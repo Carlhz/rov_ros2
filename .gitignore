@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# 编译产物
+build/
+install/
+log/
+
+# IDE
+.vscode/
+
+# b64 编码文件（源码已有 .py 版本）
+*.b64
+
+# 压缩包
+*.zip
+*.tar.gz

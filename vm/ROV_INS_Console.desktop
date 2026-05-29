@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ROV INS 控制台
+Comment=INS 监控与控制图形界面
+Exec=bash -c "source /opt/ros/foxy/setup.bash && source $HOME/rov_ros2_ws/install/setup.bash && export ROS_DOMAIN_ID=42 && export ROS_LOCALHOST_ONLY=0 && python3 $HOME/rov_ros2_ws/src/rov_ins_control/rov_ins_control/ins_gui.py"
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Science;Engineering;
+StartupNotify=true

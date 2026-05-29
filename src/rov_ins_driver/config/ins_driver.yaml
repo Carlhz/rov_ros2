@@ -1,0 +1,7 @@
+ins_driver_node:
+  ros__parameters:
+    local_ip: "192.168.0.99"
+    local_port: 8008
+    ins_ip: "192.168.0.7"
+    ins_cmd_port: 8007
+    publish_rate: 50.0

@@ -1,0 +1,22 @@
+# INS 控制服务请求
+uint8 command
+float64 latitude
+float64 longitude
+float64 altitude
+---
+# 响应
+bool success
+string message
+uint8 current_status
+
+# 命令定义
+uint8 CMD_STOP = 0        # 停止 INS，进入监控状态
+uint8 CMD_START = 1       # 启动 INS，开始对准
+uint8 CMD_SET_POS = 2     # 设置初始位置
+uint8 CMD_GET_STATUS = 3  # 获取当前状态
+
+# 状态定义
+uint8 STATUS_MONITOR = 0      # 监控状态
+uint8 STATUS_COARSE_ALIGN = 1 # 粗对准
+uint8 STATUS_FINE_ALIGN = 2   # 精对准
+uint8 STATUS_NAVIGATION = 3   # INS导航
