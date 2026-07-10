@@ -1,351 +1,253 @@
-# ROV ROS2 集成系统
+# ROV ROS2 集成控制系统
 
-ROV 水下机器人 ROS2 集成控制系统，覆盖 INS 导航、D30 深温计（深度计）、SF 超声波测深仪（高度计），支持 RK3588（aarch64）和上位机（Ubuntu VM x86_64）多机通信。
+七推进器小型 ROV 的 ROS2 Foxy 全栈控制软件，运行在 RK3588 (aarch64) + Ubuntu VM (x86_64) 双机架构上。
 
 ## 系统架构
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│                    Ubuntu VM (上位机)                       │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  sensor_monitor.py            (聚合显示所有传感器)     │  │
-│  │  ins_monitor_full.py          (INS 姿态/位置监控)      │  │
-│  │  ros2 topic echo /rov/xxx     (临时查看单个话题)       │  │
-│  └──────────────────────────────────────────────────────┘  │
-└──────────────────────┬─────────────────────────────────────┘
-                       │ DDS UDP 多播 (ROS_DOMAIN_ID=42)
-                       │ 172.16.28.x 网络
-┌──────────────────────┼─────────────────────────────────────┐
-│                 RK3588 (ROV 主控, 172.16.28.82)            │
-│  ┌──────────────────┴───────────────────────────────────┐  │
-│  │  ins_driver_full.py     ← UDP 8008 → INS 导航仪      │  │
-│  │  depth_sensor_driver.py ← ttyS3   → D30 深温计       │  │
-│  │  altimeter_driver.py    ← ttyS5   → SF 高度计        │  │
-│  └──────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                      Ubuntu VM (上位机 x86_64)                    │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  joy_controller.py      ← 罗技 F710 手柄，10Hz cmd_vel      │  │
+│  │  integrated_monitor.py  ← 彩色终端：深度/姿态/电机/航向     │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└─────────────────────────┬────────────────────────────────────────┘
+                          │ DDS UDP (ROS_DOMAIN_ID=42)
+                          │ 172.16.30.0/22 ←→ 172.16.28.82
+┌─────────────────────────┼────────────────────────────────────────┐
+│                 RK3588 (ROV 主控, aarch64, 172.16.28.82)          │
+│  ┌──────────────────────┴──────────────────────────────────────┐ │
+│  │  motor_controller.py  ← 双阶段PID定深/定航向 + 前馈补偿      │ │
+│  │  ins_driver_auto.py   ← INS 导航仪 (UDP:192.168.0.7:8008)  │ │
+│  │  dvl_driver.py        ← PathFinder DVL (TCP:192.168.0.6)   │ │
+│  │  depth_sensor_driver  ← D30 深温计 (Modbus-RTU, ttyS5)     │ │
+│  │  altimeter_driver     ← SF 超声波高度计 (ttyS3)              │ │
+│  │  sonar_omni_driver*   ← 全向声纳 (UDP:192.168.0.5:23, C++) │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-### 传感器连接
+## 硬件配置
 
-| 传感器 | 型号 | 接口 | RK3588 串口 | 协议 |
-|--------|------|------|-------------|------|
-| INS 导航仪 | — | 以太网 (UDP 8008) | eth0:192.168.0.99 | 自定义 202字节帧 |
-| D30 深温计 | CERPTS05D30-485 | RS-485 | ttyS3, 19200bps | MODBUS-RTU |
-| SF 高度计 | 超声波测深仪 | RS-485 | ttyS5, 9600bps | 自定义 AA/A0 帧 |
+### 推进器布局（7 电机）
 
-### 发布话题一览
+| ID | 位置/方向 | RPM 范围 | 备注 |
+|----|----------|---------|------|
+| 0 | 尾部左上，上倾 +22.5° | 1100–1550 | 前进产生下压 |
+| 1 | 尾部左下，下倾 -22.5° | 1100–1550 | 反装，后退产生下压 |
+| 2 | 尾部右下，下倾 -22.5° | 1100–1550 | 反装，后退产生下压 |
+| 3 | 尾部右上，上倾 +22.5° | 1100–1550 | 前进产生下压 |
+| 5 | 垂直推进 | 1100–1550 | ID5 CW→下潜 |
+| 6 | 垂直推进 | 1100–1550 | ID6 CW→下潜（CAN 反相）|
+| 7 | 横向/转向 | 1100–1400 | YAW_DIRECTION=-1 修正 |
 
-**INS (ins_driver_full.py):**
+### 传感器一览
 
-| 话题 | 类型 | 说明 |
-|------|------|------|
-| `/ins/data` | InsData | INS 完整数据（姿态/位置/速度/GNSS） |
-| `/ins/imu` | — | IMU 九轴数据 |
-| `/ins/gps` | — | GNSS 定位数据 |
-| ... | | 共 20+ 话题，100Hz |
+| 传感器 | 型号 | 接口 | 话题 |
+|--------|------|------|------|
+| INS 导航仪 | — | UDP 8008 (192.168.0.7) | `/ins/attitude`, `/ins/velocity`, `/ins/position` |
+| D30 深温计 | CERPTS05D30-485 | RS-485, ttyS5, 19200bps | `/rov/depth`, `/rov/depth_temp`, `/rov/depth_pressure` |
+| SF 高度计 | 超声波 | RS-485, ttyS3, 9600bps | `/rov/altitude`, `/rov/altitude_nearest` |
+| DVL | PathFinder 600kHz | TCP 192.168.0.6 (PD0) | `/rov/dvl/bottom_vel`, `/rov/dvl/altitude`, `/rov/dvl/status` |
+| 全向声纳 | — | UDP 192.168.0.5:23 | `/rov/sonar_omni/*` |
 
-**深度计 (depth_sensor_driver.py):**
+### 网络拓扑
 
-| 话题 | 类型 | 说明 |
-|------|------|------|
-| `/rov/depth` | Float32 | 水深（米） |
-| `/rov/depth_temp` | Float32 | 水温（°C） |
-| `/rov/depth_pressure` | Float32 | 压力（MPa） |
-
-**高度计 (altimeter_driver.py):**
-
-| 话题 | 类型 | 说明 |
-|------|------|------|
-| `/rov/altitude` | Float32 | 距底高度-最强目标（米） |
-| `/rov/altitude_nearest` | Float32 | 距底高度-最近目标（米） |
-| `/rov/altitude_raw` | Float32 | 原始最强距离（米） |
+```
+VM (172.16.30.0/22)
+  ↕
+RK3588 (172.16.28.82 / 192.168.0.99)
+  ↕ 交换机
+  ├── 声纳 (192.168.0.5)
+  ├── INS  (192.168.0.7)
+  └── DVL  (192.168.0.6)
+```
 
 ## 目录结构
 
 ```
 rov_ros2/
-├── sensors/                       # 传感器驱动（纯 Python，零编译）
-│   ├── depth_sensor_driver.py     # D30 深温计驱动 → /rov/depth*
-│   └── altimeter_driver.py        # SF 高度计驱动   → /rov/altitude*
+├── rk3588/                  # RK3588 端主程序
+│   ├── motor_controller.py  # 电机控制 v8.0（PID + 推力分配 + CAN）
+│   ├── thrust_allocator.py  # B+ 伪逆推力分配矩阵
+│   ├── start_all.sh         # 统一启停（传感器 + 电机 + DVL）
+│   ├── dvl_driver.py        # PathFinder DVL PD0 协议驱动
+│   ├── ins_driver_auto.py   # INS 导航仪 202 字节协议驱动
+│   ├── auto_depth_test.py   # 自动化 5 轮定深测试
+│   ├── setup_can.sh         # CAN0 初始化（500kbps, systemd 自启）
+│   └── setup_ip.sh          # 辅助 IP 192.168.0.99
 │
-├── vm/                            # 上位机监控（Ubuntu VM 端运行）
-│   ├── sensor_monitor.py          # 聚合显示深度/高度/水温（彩色终端）
-│   └── ins_monitor_full.py        # INS 姿态/位置监控
+├── vm/                      # VM 上位机端
+│   ├── joy_controller.py    # 手柄控制 v5.0（4 档位，定深/定航向）
+│   ├── integrated_monitor.py# 集成监控（深度/姿态/PID/电机/航向）
+│   ├── start_joy.sh         # 手柄启动脚本
+│   └── start_monitor.sh     # 监控启动脚本
 │
-├── rk3588/                        # RK3588 启动脚本
-│   ├── start_sensors.sh           # 传感器一键启停管理
-│   └── start_ins_driver.sh        # INS 驱动启动
+├── sensors/                 # 传感器驱动（纯 Python）
+│   ├── depth_sensor_driver.py   # D30 深温计 Modbus-RTU
+│   └── altimeter_driver.py      # SF 高度计 AA/A0 协议
 │
-├── docs/                          # 协议文档
-│   ├── D30_depth_sensor_protocol.md
-│   └── SF_altimeter_protocol.md
+├── src/                     # ROS2 colcon 包（需交叉编译）
+│   ├── rov_sonar_driver/    # 全向声纳 C++ 驱动
+│   ├── rov_sonar_interface/ # 声纳配置服务（.srv）
+│   └── rov_sonar_monitor/   # 声纳可视化节点
 │
-├── deploy/                        # 部署工具
-│   └── deploy_sensors.sh          # 从 Windows 部署到 RK3588
+├── deploy/                  # 部署工具
+│   ├── deploy_now.py        # 一键部署到 RK3588 + VM
+│   ├── toolchain_aarch64.cmake      # 交叉编译工具链
+│   └── toolchain_aarch64_relaxed.cmake
 │
-├── src/                           # INS 相关 ROS2 包（需 colcon build）
-│   ├── rov_ins_interfaces/
-│   ├── rov_ins_driver/
-│   └── rov_topside/
+├── tools/                   # 辅助工具
+│   ├── train_depth_ff.py    # 前馈补偿模型训练（最小二乘）
+│   ├── yaw_balance_calc.py  # Yaw 推力平衡分析
+│   └── pull_csv.py          # 从 RK3588 取回 CSV 数据
 │
-└── README.md
+├── docs/                    # 文档
+│   ├── ROV_OPERATION_MANUAL.md
+│   ├── SONAR_OMNI_PROTOCOL.md
+│   └── ROS2_CPP_CROSS_COMPILE_GUIDE.md
+│
+└── test/                    # 测试脚本
 ```
 
 ## 快速开始
 
-### 环境要求
-
-- **RK3588**：预装 ROS2（含 rclpy），Python 3，零额外依赖
-- **上位机 VM**：ROS2 Humble/Foxy，Python 3
-
-### 必需环境变量（两端都要设）
+### 环境变量（两端都必须设置）
 
 ```bash
-source /opt/ros/humble/setup.bash          # 按实际版本调整
+source /opt/ros/foxy/setup.bash    # RK3588 用 Foxy
 export ROS_DOMAIN_ID=42
 export ROS_LOCALHOST_ONLY=0
 ```
 
-建议写入 `~/.bashrc` 永久生效：
-
-```bash
-echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
-echo "export ROS_DOMAIN_ID=42" >> ~/.bashrc
-echo "export ROS_LOCALHOST_ONLY=0" >> ~/.bashrc
-source ~/.bashrc
-```
-
-### 1. 部署到 RK3588
-
-从 Windows 主机（需安装 PuTTY，使用 pscp/plink）：
-
-```bash
-# 上传传感器驱动
-pscp -pw <密码> sensors/depth_sensor_driver.py root@172.16.28.82:/opt/ros/rov_ros2_ws/
-pscp -pw <密码> sensors/altimeter_driver.py  root@172.16.28.82:/opt/ros/rov_ros2_ws/
-pscp -pw <密码> rk3588/start_sensors.sh      root@172.16.28.82:/opt/ros/rov_ros2_ws/
-
-# 设置可执行权限
-plink -pw <密码> root@172.16.28.82 "chmod +x /opt/ros/rov_ros2_ws/start_sensors.sh"
-```
-
-### 2. 启动传感器驱动（RK3588 端）
+### RK3588 端：一键启动全部
 
 ```bash
 ssh root@172.16.28.82
-cd /opt/ros/rov_ros2_ws/
+cd /opt/ros/rov_ros2_ws
 
-# 后台启动全部传感器
-./start_sensors.sh bg
-
-# 查看运行状态
-./start_sensors.sh status
-
-# 停止全部传感器
-./start_sensors.sh stop
+./start_all.sh bg       # 后台启动（传感器 + DVL + 电机控制）
+./start_all.sh stop     # 停止全部
+./start_all.sh status   # 查看运行状态
+./start_all.sh logs     # 查看所有日志
 ```
 
-**单独运行调试：**
+### VM 端：手柄 + 监控
 
 ```bash
-source /opt/ros/setup.bash
-export ROS_DOMAIN_ID=42
-python3 depth_sensor_driver.py    # 仅深度计（前台，可看日志）
-python3 altimeter_driver.py       # 仅高度计
+# 终端 1：手柄控制
+source /opt/ros/foxy/setup.bash && export ROS_DOMAIN_ID=42
+bash ~/rov_ros2_ws/start_joy.sh
+
+# 终端 2：彩色监控面板
+source /opt/ros/foxy/setup.bash && export ROS_DOMAIN_ID=42
+python3 ~/rov_ros2_ws/vm/integrated_monitor.py
 ```
 
-### 3. 上位机查看数据（VM 端）
+### 从 Windows 一键部署
 
 ```bash
-# 确认能收到话题
-ros2 topic list
-# 应看到：/rov/depth  /rov/depth_temp  /rov/depth_pressure
-#          /rov/altitude  /rov/altitude_nearest  /rov/altitude_raw
-
-# 方式 A：聚合监控（推荐，一个窗口看全部）
-python3 vm/sensor_monitor.py
-
-# 方式 B：逐个查看
-ros2 topic echo /rov/altitude
-ros2 topic echo /rov/depth
-
-# 方式 C：查看话题频率
-ros2 topic hz /rov/altitude
+cd D:\Carl_WorkStation\rov_ros2\deploy
+python deploy_now.py --all     # 部署到 RK3588 + VM
+python deploy_now.py --vm      # 仅部署 VM 脚本
 ```
 
-## 日常操作速查
+## 控制功能
 
-### RK3588 端
+### 手柄操作（罗技 F710 D 模式）
+
+| 操作 | 功能 |
+|------|------|
+| 左摇杆 Y（上下）| 前进/后退 |
+| 右摇杆 Y（上下）| 下潜/上浮 |
+| 右摇杆 X（左右）| 左转/右转 |
+| A 键 | 急停（所有电机停转）|
+| B 键 | 恢复 |
+| LB / RB | 降档/升档（1~4 档，4 档=定深专用）|
+| X 键 | 定航向开关（任意档位）|
+| Y 键 | 定深悬停开关（仅 4 档）|
+
+定航向开启后，LB/RB 调整目标航向 ±5°；定深悬停后，LB/RB 调整目标深度 ±0.1m。
+
+### 控制模式
+
+- **手动模式**：手柄直接映射到 7 路电机 RPM，PID 不介入
+- **定深模式**（4 档 + Y 键）：两阶段深度控制 + Roll/Pitch 姿态 PID
+  - 阶段 1（误差 >0.10m）：固定推力快速趋近
+  - 阶段 2（误差 ≤0.10m）：PID 精细调节 + 前馈补偿
+- **定航向模式**（X 键）：两阶段 Yaw 控制，ID7 主导 + 尾推辅助
+  - 阶段 1（误差 >10°）：固定 1400 RPM 大转速回正
+  - 阶段 2（误差 ≤10°）：高增益 PID 微调（KP=0.15, KI=0.06）
+
+### 推力分配
+
+基于 B+ 伪逆矩阵的 7×6 推力分配（`thrust_allocator.py`），将 6-DOF 归一化力/力矩映射到 7 路电机 RPM。支持：
+- 尾部电机差速产生 Roll/Pitch/Yaw 力矩
+- 垂直推力的尾推辅助混合（防俯仰摆动）
+- Fz 深度控制绕开 B+ 分配器，手工分配到推力矩阵中
+
+### 安全保护
+
+- 5 秒无 cmd_vel → 自动全停
+- Pitch >30° 线性降推，>55° 全部归零
+- A 键急停（发布零速 cmd_vel）
+
+## 话题速查
+
+### 传感器话题
+
+| 话题 | 发布频率 | 说明 |
+|------|---------|------|
+| `/rov/depth` | 10Hz | 水深 (m) |
+| `/rov/depth_temp` | 1Hz | 水温 (°C) |
+| `/rov/altitude` | 5Hz | 距底高度 (m) |
+| `/ins/attitude` | 100Hz | roll/pitch/yaw (°) |
+| `/ins/velocity` | 100Hz | ve/vn (m/s) |
+| `/ins/acceleration` | 100Hz | ax/ay/az (m/s²) |
+| `/ins/angular_rate` | 100Hz | wx/wy/wz (°/s) |
+| `/ins/alignment` | 1Hz | INS 对准状态 |
+
+### 控制话题
+
+| 话题 | 方向 | 说明 |
+|------|------|------|
+| `/cmd_vel` | VM → RK3588 | 手柄控制指令 |
+| `/rov/motor_state` | RK3588 → VM | 电机状态（JSON），含深度/PID/RPM/姿态/定航向 |
+
+## 交叉编译
+
+全向声纳驱动使用 C++ 编写，在 VM 上交叉编译后部署到 RK3588 (aarch64)。
 
 ```bash
-ssh root@172.16.28.82
-cd /opt/ros/rov_ros2_ws/
+# VM 上编译
+source /home/carl/RK3588/rk3588_linux_release/ubuntu/environment
+colcon build --packages-select rov_sonar_driver --cmake-args \
+  -DCMAKE_TOOLCHAIN_FILE=/mnt/hgfs/CarlWS/rov_ros2/deploy/toolchain_aarch64_relaxed.cmake
 
-./start_sensors.sh bg       # 启动
-./start_sensors.sh stop     # 停止
-./start_sensors.sh status   # 看谁在跑
+# 部署到 RK3588
+scp -r install/* root@172.16.28.82:/opt/ros/rov_ros2_ws/install/
 ```
 
-### VM 端
+详见 [docs/ROS2_CPP_CROSS_COMPILE_GUIDE.md](docs/ROS2_CPP_CROSS_COMPILE_GUIDE.md)。
 
-```bash
-# 彩色监控面板
-python3 ~/rov_ros2_ws/vm/sensor_monitor.py
+## 故障排查
 
-# 单话题调试
-ros2 topic echo /rov/altitude
-ros2 topic hz /rov/altitude
-
-# 节点拓扑
-ros2 node list
-ros2 node info /altimeter_driver
-```
-
-## 故障排除
-
-### VM 上看不到话题
-
-```bash
-# 1. 网络连通？
-ping 172.16.28.82
-
-# 2. ROS_DOMAIN_ID 一致？
-echo $ROS_DOMAIN_ID        # 两端都应该是 42
-
-# 3. VM 网卡模式？
-#    NAT 模式 → UDP 多播过不去，必须改为桥接模式
-
-# 4. 防火墙？
-sudo ufw disable            # 临时测试
-```
-
-### 传感器无数据
-
-```bash
-# RK3588 上测试硬件
-python3 /opt/ros/rov_ros2_ws/test_altimeter_raw.py   # 高度计诊断
-python3 /opt/ros/rov_ros2_ws/test_depth_raw.py       # 深度计诊断
-
-# 查看驱动日志
-cat /tmp/alti.log
-cat /tmp/depth.log
-```
-
-### 重启流程
-
-```bash
-# RK3588:
-./start_sensors.sh stop && ./start_sensors.sh bg
-
-# VM:
-Ctrl+C 退出 sensor_monitor.py，再重新 python3 sensor_monitor.py
-```
+| 现象 | 检查项 |
+|------|--------|
+| VM 看不到话题 | `echo $ROS_DOMAIN_ID` 是否=42？`ping 172.16.28.82`？|
+| 传感器无数据 | RK3588 上 `cat /tmp/{depth_sensor,altimeter,dvl_driver,ins_driver}.log` |
+| 电机不转 | `cat /tmp/motor_controller.log`，检查 CAN 状态 |
+| INS 无数据 | `ping 192.168.0.7`，冷启动需 2-5 分钟对准 |
+| DVL 无数据 | `ping 192.168.0.6`，DVL 核心可能 hung 需物理断电重启 |
+| 部署失败 | 需要 paramiko 包，用项目配套 Python 路径执行 |
 
 ## 协议文档
 
 - [D30 深温计 MODBUS-RTU 协议](docs/D30_depth_sensor_protocol.md)
 - [SF 超声波测深仪协议](docs/SF_altimeter_protocol.md)
-
-## 设计说明
-
-### 为什么不用 colcon build？
-
-传感器驱动使用**纯 Python + 标准消息类型**（`std_msgs/Float32`），直接 `python3 xxx.py` 运行，跳过 colcon 编译：
-
-- 不需要 `package.xml` / `setup.py` / `CMakeLists.txt`
-- 不需要自定义 `.msg` 文件
-- RK3588 上零额外 Python 依赖（只用 `termios`、`os`、`struct` 等内置模块）
-- 修改代码后直接 scp 上传即生效，无需重新 build
-
-当需要自定义消息类型或 `ros2 launch` 管理多节点时，再切 colcon 包即可。
-
-## 移植到新板子
-
-换新主控板（如换另一块 RK3588、树莓派、Jetson 等）时，核心工作只有三步：**确认串口 → 传代码 → 启动**。
-
-### 移植前提
-
-新板子需要具备：
-
-| 条件 | 检查方式 |
-|------|---------|
-| Linux 系统 | `uname -a` |
-| ROS2 已安装（含 rclpy） | `source /opt/ros/*/setup.bash && python3 -c "import rclpy"` |
-| Python 3 | `python3 --version` |
-| RS-485 串口可用 | `ls /dev/ttyS* /dev/ttyUSB* /dev/ttyAMA*` |
-| 与新上位机同网段 | `ping <上位机IP>` |
-
-### 移植步骤
-
-**1. 在新板子上确认串口名**
-
-```bash
-ls -la /dev/ttyS* /dev/ttyUSB* /dev/ttyAMA* 2>/dev/null
-
-# 不确定哪个是传感器？挨个试：
-python3 test_altimeter_raw.py    # 会遍历常见串口，找到有回复的
-```
-
-**2. 传代码到新板子**
-
-```bash
-# 方式 A：从 Git 仓库克隆
-git clone <你的仓库地址> /opt/ros/rov_ros2_ws/
-
-# 方式 B：scp 整个目录
-scp -r sensors/ rk3588/ vm/ root@<新板IP>:/opt/ros/rov_ros2_ws/
-```
-
-**3. 指定串口并启动**
-
-新板子的串口名如果不是 `ttyS3`/`ttyS5`，通过环境变量覆盖，**不需要改代码**：
-
-```bash
-cd /opt/ros/rov_ros2_ws/
-
-# 假设新板子深度计在 /dev/ttyUSB0，高度计在 /dev/ttyUSB1
-DEPTH_PORT=/dev/ttyUSB0 ALTI_PORT=/dev/ttyUSB1 ./start_sensors.sh bg
-```
-
-所有可覆盖的环境变量：
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `DEPTH_PORT` | `/dev/ttyS3` | 深度计串口 |
-| `ALTI_PORT` | `/dev/ttyS5` | 高度计串口 |
-| `ROS_DOMAIN_ID` | `42` | DDS 域 ID（新旧板子必须一致） |
-
-**4. 在新上位机上验证**
-
-```bash
-source /opt/ros/humble/setup.bash
-export ROS_DOMAIN_ID=42
-ros2 topic list | grep rov
-python3 vm/sensor_monitor.py
-```
-
-### 不需要做的事
-
-- ❌ 不需要重新编译（纯 Python，零依赖）
-- ❌ 不需要安装第三方 pip 包（只用 Python 内置模块）
-- ❌ 不需要改话题名或消息类型
-- ❌ 上位机监控脚本无需任何修改
-
-### 故障排查
-
-```bash
-# 串口无响应 → 物理测试
-python3 test_depth_raw.py        # 直读 MODBUS，不经过 ROS2
-python3 test_altimeter_raw.py    # 直读 AA/A0 协议
-
-# 话题可见但无数据 → 驱动日志
-cat /tmp/depth.log
-cat /tmp/alti.log
-
-# 上位机看不到 → 检查网段和 DOMAIN_ID
-ping <新板IP>
-echo $ROS_DOMAIN_ID              # 两端必须一致
-```
+- [SONAR_OMNI 全向声纳协议](docs/SONAR_OMNI_PROTOCOL.md)
+- [ROV 操作手册](docs/ROV_OPERATION_MANUAL.md)
+- [C++ 交叉编译指南](docs/ROS2_CPP_CROSS_COMPILE_GUIDE.md)
 
 ## 许可证
 
