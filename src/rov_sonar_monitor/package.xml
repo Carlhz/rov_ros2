@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>rov_sonar_monitor</name>
+  <version>1.0.0</version>
+  <description>ROV omnidirectional sonar monitoring node (VM topside)</description>
+  <maintainer email="rov@example.com">ROV Team</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>rov_sonar_interface</depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

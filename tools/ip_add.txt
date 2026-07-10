@@ -1,0 +1,11 @@
+[sudo] password for carl: === New IPs ===
+172.16.203.128 172.16.28.99 
+=== Ping RK3588 via new IP ===
+PING 172.16.28.82 (172.16.28.82) 56(84) bytes of data.
+From 172.16.28.99 icmp_seq=1 Destination Host Unreachable
+From 172.16.28.99 icmp_seq=2 Destination Host Unreachable
+
+--- 172.16.28.82 ping statistics ---
+2 packets transmitted, 0 received, +2 errors, 100% packet loss, time 1005ms
+pipe 2
+DONE

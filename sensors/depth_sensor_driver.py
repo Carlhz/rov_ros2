@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 D30 深温计 ROS2 驱动 — MODBUS-RTU 协议
-零外部依赖（仅需 ROS2 rclpy）。运行于 RK3588，RS485 ttyS3。
+零外部依赖（仅需 ROS2 rclpy）。运行于 RK3588，RS485 ttyS5。
 
 话题：
   /rov/depth          std_msgs/Float32  水深（米）
@@ -13,7 +13,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32
 
-SERIAL_PORT = '/dev/ttyS3'
+SERIAL_PORT = os.environ.get('DEPTH_PORT', '/dev/ttyS5')
 BAUDRATE = 19200
 DEVICE_ADDR = 0x01
 

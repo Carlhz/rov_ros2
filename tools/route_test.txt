@@ -1,0 +1,14 @@
+=== route to 172.16.28.82 ===
+172.16.28.82 dev ens33 src 172.16.28.99 uid 1000 
+    cache 
+=== full routing table ===
+default via 172.16.203.2 dev ens33 proto dhcp metric 100 
+169.254.0.0/16 dev ens33 scope link metric 1000 
+172.16.28.0/24 dev ens33 proto kernel scope link src 172.16.28.99 
+172.16.203.0/24 dev ens33 proto kernel scope link src 172.16.203.128 metric 100 
+=== ARP ===
+Address                  HWtype  HWaddress           Flags Mask            Iface
+172.16.28.82                     (incomplete)                              ens33
+172.16.203.2             ether   00:50:56:f0:76:0e   C                     ens33
+172.16.203.254           ether   00:50:56:f9:6c:7d   C                     ens33
+END

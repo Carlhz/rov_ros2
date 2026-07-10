@@ -1,0 +1,16 @@
+[sudo] password for carl:   Unbinding 3-2:1.0 from uvcvideo...
+  Unbound OK
+Claimed interface 0 OK
+Reading IMU from EP 0x87 (10 seconds)...
+
+
+Total: 0 packets in 10.0s, 0.0Hz, 0 errors
+
+No data received! Trying without timeout...
+  Attempt 0: ret=-7 transferred=0
+  Attempt 1: ret=-7 transferred=0
+  Attempt 2: ret=-7 transferred=0
+  Attempt 3: ret=-7 transferred=0
+  Attempt 4: ret=-7 transferred=0
+  Rebinding 3-2:1.0 to uvcvideo...
+EXIT:0

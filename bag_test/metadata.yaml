@@ -1,0 +1,19 @@
+rosbag2_bagfile_information:
+  version: 4
+  storage_identifier: sqlite3
+  relative_file_paths:
+    - sonar_bag_test_0.db3
+  duration:
+    nanoseconds: 3955002576
+  starting_time:
+    nanoseconds_since_epoch: 1781685156871799569
+  message_count: 352
+  topics_with_message_count:
+    - topic_metadata:
+        name: /sonar/omni/original
+        type: sensor_msgs/msg/PointCloud2
+        serialization_format: cdr
+        offered_qos_profiles: ""
+      message_count: 352
+  compression_format: ""
+  compression_mode: ""

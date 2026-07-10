@@ -1,0 +1,4 @@
+libusb: libusb-1.0.so.0
+Found YLX camera: 1BCF:0B15
+libusb_open: ERROR_ACCESS
+EXIT:1

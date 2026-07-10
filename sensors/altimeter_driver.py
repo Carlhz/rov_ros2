@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 SF 超声波测深仪（高度计）ROS2 驱动
-零外部依赖（仅需 ROS2 rclpy）。运行于 RK3588，RS485 ttyS5。
+零外部依赖（仅需 ROS2 rclpy）。运行于 RK3588，RS485 ttyS3。
 
 话题：
   /rov/altitude         std_msgs/Float32  最强目标距离（米）
@@ -13,10 +13,11 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32
 
-SERIAL_PORT = '/dev/ttyS5'
+SERIAL_PORT = os.environ.get('ALTI_PORT', '/dev/ttyS3')
 BAUDRATE = 9600
 DEVICE_ID = 1
 FRAME_LEN = 17
+READ_BUF = FRAME_LEN + 6   # 预留前导干扰字节空间
 BLIND_ZONE_CM = 20
 
 
@@ -84,13 +85,17 @@ def build_command(dev_id):
 
 
 def parse_response(data):
+    """带帧同步的解析：在响应中搜索 AB A0 帧头"""
     if len(data) < FRAME_LEN:
         return None
-    if data[0] != 0xAB or data[1] != 0xA0:
-        return None
-    nearest = (data[4] << 8) | data[5]
-    strongest = (data[8] << 8) | data[9]
-    return nearest, strongest
+    # 搜索 AB A0 帧头（允许前导垃圾字节）
+    for offset in range(len(data) - FRAME_LEN + 1):
+        if data[offset] == 0xAB and data[offset + 1] == 0xA0:
+            d = data[offset:offset + FRAME_LEN]
+            nearest = (d[4] << 8) | d[5]
+            strongest = (d[8] << 8) | d[9]
+            return nearest, strongest
+    return None
 
 
 # ── ROS2 节点 ─────────────────────────────────────────
@@ -117,7 +122,7 @@ class AltimeterDriver(Node):
             self.ser.write(self.cmd)
             self.ser.flush()
             time.sleep(0.1)
-            resp = self.ser.read(FRAME_LEN)
+            resp = self.ser.read(READ_BUF)
             if len(resp) < FRAME_LEN:
                 self.fail += 1
                 if self.fail == 1:

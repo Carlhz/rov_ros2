@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/home/carl/imu_probe_quick.py", line 3, in <module>
+    import usb.core
+ModuleNotFoundError: No module named 'usb'
+EXIT:1

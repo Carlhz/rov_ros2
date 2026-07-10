@@ -1,0 +1,15 @@
+[sudo] password for carl: === YLX IMU: Scan ALL interrupt endpoints ===
+
+Unbinding uvcvideo from 3-2:1.0...
+  Error: [Errno 2] No such file or directory: '/sys/bus/usb/devices/3-2:1.0/driver/unbind'
+claim_interface(0): 0
+
+Scanning EP 0x81 through 0x8F (1s each)...
+
+  EP 0x82: 0 packets (no data)
+  EP 0x87: 0 packets (no data)
+
+Rebinding uvcvideo...
+  Rebound
+
+Done.

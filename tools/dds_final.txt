@@ -1,0 +1,4 @@
+=== Topic discovery (15s) ===
+/parameter_events
+/rosout
+END

@@ -1,0 +1,5 @@
+=== topics ===
+/parameter_events
+/rosout
+=== nodes ===
+END

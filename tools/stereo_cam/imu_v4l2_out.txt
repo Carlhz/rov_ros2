@@ -1,0 +1,17 @@
+[sudo] password for carl: === YLX IMU: V4L2 video stream activation + EP 0x87 read v2 ===
+
+YLX found: usb_id=3-2
+  Video devices: ['/dev/video0', '/dev/video1']
+  Interface 0: /sys/bus/usb/devices/3-2/3-2:1.0
+
+============================================================
+Strategy A: V4L2 stream ON + libusb auto_detach + EP 0x87
+============================================================
+
+Opening V4L2: /dev/video0
+Traceback (most recent call last):
+  File "/home/carl/imu_v4l2_activate.py", line 409, in <module>
+    main()
+  File "/home/carl/imu_v4l2_activate.py", line 253, in main
+    fcntl.ioctl(fd, VIDIOC_QUERYCAP, cap)
+OSError: [Errno 25] Inappropriate ioctl for device

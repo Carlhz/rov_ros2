@@ -1,0 +1,63 @@
+=== INPUT DEVICES ===
+total 0
+drwxr-xr-x 2 root root 100 Jun 23 02:36 .
+drwxr-xr-x 4 root root 280 Jun 23 02:36 ..
+lrwxrwxrwx 1 root root   9 Jun 23 02:34 usb-VMware_VMware_Virtual_USB_Mouse-event-mouse -> ../event4
+lrwxrwxrwx 1 root root   9 Jun 23 02:34 usb-VMware_VMware_Virtual_USB_Mouse-mouse -> ../mouse2
+lrwxrwxrwx 1 root root   9 Jun 23 02:36 usb-YLX-250917-A_YLX_CAMERA_01.00.00-event-if00 -> ../event5
+total 0
+drwxr-xr-x 2 root root 160 Jun 23 02:36 .
+drwxr-xr-x 4 root root 280 Jun 23 02:36 ..
+lrwxrwxrwx 1 root root   9 Jun 23 02:34 pci-0000:03:00.0-usb-0:1:1.0-event-mouse -> ../event4
+lrwxrwxrwx 1 root root   9 Jun 23 02:34 pci-0000:03:00.0-usb-0:1:1.0-mouse -> ../mouse2
+lrwxrwxrwx 1 root root   9 Jun 23 02:36 pci-0000:03:00.0-usb-0:2:1.0-event -> ../event5
+lrwxrwxrwx 1 root root   9 Jun 23 02:34 platform-i8042-serio-0-event-kbd -> ../event1
+lrwxrwxrwx 1 root root   9 Jun 23 02:34 platform-i8042-serio-1-event-mouse -> ../event2
+lrwxrwxrwx 1 root root   9 Jun 23 02:34 platform-i8042-serio-1-mouse -> ../mouse0
+
+=== INPUT DEVICE INFO ===
+--- /dev/input/event0 ---
+P: /devices/LNXSYSTM:00/LNXPWRBN:00/input/input0/event0
+N: input/event0
+L: 0
+E: DEVPATH=/devices/LNXSYSTM:00/LNXPWRBN:00/input/input0/event0
+E: DEVNAME=/dev/input/event0
+--- /dev/input/event1 ---
+P: /devices/platform/i8042/serio0/input/input1/event1
+N: input/event1
+L: 0
+S: input/by-path/platform-i8042-serio-0-event-kbd
+E: DEVPATH=/devices/platform/i8042/serio0/input/input1/event1
+--- /dev/input/event2 ---
+P: /devices/platform/i8042/serio1/input/input4/event2
+N: input/event2
+L: 0
+S: input/by-path/platform-i8042-serio-1-event-mouse
+E: DEVPATH=/devices/platform/i8042/serio1/input/input4/event2
+--- /dev/input/event3 ---
+P: /devices/platform/i8042/serio1/input/input3/event3
+N: input/event3
+L: 0
+S: input/by-path/platform-i8042-serio-1-event-mouse
+E: DEVPATH=/devices/platform/i8042/serio1/input/input3/event3
+--- /dev/input/event4 ---
+P: /devices/pci0000:00/0000:00:15.0/0000:03:00.0/usb3/3-1/3-1:1.0/0003:0E0F:0003.0001/input/input5/event4
+N: input/event4
+L: 0
+S: input/by-path/pci-0000:03:00.0-usb-0:1:1.0-event-mouse
+S: input/by-id/usb-VMware_VMware_Virtual_USB_Mouse-event-mouse
+--- /dev/input/event5 ---
+P: /devices/pci0000:00/0000:00:15.0/0000:03:00.0/usb3/3-2/3-2:1.0/input/input6/event5
+N: input/event5
+L: 0
+S: input/by-id/usb-YLX-250917-A_YLX_CAMERA_01.00.00-event-if00
+S: input/by-path/pci-0000:03:00.0-usb-0:2:1.0-event
+
+=== HIDRAW ===
+crw------- 1 root root 241, 0 Jun 23 02:34 /dev/hidraw0
+
+=== EVTEST CAPTURE (2 sec) ===
+
+=== HIDRAW CAPTURE (2 sec) ===
+
+=== DONE ===

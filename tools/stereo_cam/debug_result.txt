@@ -1,0 +1,44 @@
+=== debugfs ===
+debugfs on /sys/kernel/debug type debugfs (rw,nosuid,nodev,noexec,relatime)
+sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper
+sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper
+
+=== uvcvideo trace ===
+0
+sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper
+
+=== Trigger camera activity ===
+<<<<<
+
+=== dmesg ===
+[    8.448723] RAPL PMU: API unit is 2^-32 Joules, 0 fixed counters, 10737418240 ms ovfl timer
+[    8.638130] cryptd: max_cpu_qlen set to 1000
+[    8.861897] AVX2 version of gcm_enc/dec engaged.
+[    8.862638] AES CTR mode by8 optimization enabled
+[   12.585573] audit: type=1400 audit(1782196497.804:2): apparmor="STATUS" operation="profile_load" profile="unconfined" name="libreoffice-oopslash" pid=790 comm="apparmor_parser"
+[   12.585761] audit: type=1400 audit(1782196497.804:3): apparmor="STATUS" operation="profile_load" profile="unconfined" name="/usr/bin/man" pid=788 comm="apparmor_parser"
+[   12.585766] audit: type=1400 audit(1782196497.804:4): apparmor="STATUS" operation="profile_load" profile="unconfined" name="man_filter" pid=788 comm="apparmor_parser"
+[   12.585767] audit: type=1400 audit(1782196497.804:5): apparmor="STATUS" operation="profile_load" profile="unconfined" name="man_groff" pid=788 comm="apparmor_parser"
+[   12.612345] audit: type=1400 audit(1782196497.832:6): apparmor="STATUS" operation="profile_load" profile="unconfined" name="/usr/lib/NetworkManager/nm-dhcp-client.action" pid=786 comm="apparmor_parser"
+[   12.612349] audit: type=1400 audit(1782196497.832:7): apparmor="STATUS" operation="profile_load" profile="unconfined" name="/usr/lib/NetworkManager/nm-dhcp-helper" pid=786 comm="apparmor_parser"
+[   12.612351] audit: type=1400 audit(1782196497.832:8): apparmor="STATUS" operation="profile_load" profile="unconfined" name="/usr/lib/connman/scripts/dhclient-script" pid=786 comm="apparmor_parser"
+[   12.612352] audit: type=1400 audit(1782196497.832:9): apparmor="STATUS" operation="profile_load" profile="unconfined" name="/{,usr/}sbin/dhclient" pid=786 comm="apparmor_parser"
+[   12.619876] audit: type=1400 audit(1782196497.840:10): apparmor="STATUS" operation="profile_load" profile="unconfined" name="/usr/sbin/tcpdump" pid=793 comm="apparmor_parser"
+[   12.620261] audit: type=1400 audit(1782196497.840:11): apparmor="STATUS" operation="profile_load" profile="unconfined" name="ippusbxd" pid=794 comm="apparmor_parser"
+[   12.949192] NET: Registered PF_VSOCK protocol family
+[   16.319832] e1000: ens33 NIC Link is Up 1000 Mbps Full Duplex, Flow Control: None
+[   16.319920] IPv6: ADDRCONF(NETDEV_CHANGE): ens33: link becomes ready
+[   19.927525] loop15: detected capacity change from 0 to 8
+[   30.394119] rfkill: input handler disabled
+[   80.461690] usb 3-2: new high-speed USB device number 5 using xhci_hcd
+[   80.875905] usb 3-2: New USB device found, idVendor=1bcf, idProduct=0b15, bcdDevice=12.03
+[   80.875909] usb 3-2: New USB device strings: Mfr=1, Product=2, SerialNumber=3
+[   80.875911] usb 3-2: Product: YLX CAMERA
+[   80.875912] usb 3-2: Manufacturer: YLX-250917-A
+[   80.875913] usb 3-2: SerialNumber: 01.00.00
+[   81.084023] mc: Linux media interface: v0.10
+[   81.134690] videodev: Linux video capture interface: v2.00
+[   81.251123] usb 3-2: Found UVC 1.00 device YLX CAMERA (1bcf:0b15)
+[   81.321040] input: YLX CAMERA: YLX CAMERA as /devices/pci0000:00/0000:00:15.0/0000:03:00.0/usb3/3-2/3-2:1.0/input/input6
+[   81.321140] usbcore: registered new interface driver uvcvideo
+sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper

@@ -1,0 +1,13 @@
+=== FastRTPS version ===
+ii  ros-foxy-fastrtps                               2.1.4-1focal.20230527.035957         amd64        Implementation of RTPS standard.
+ii  ros-foxy-fastrtps-cmake-module                  1.0.4-1focal.20230527.035710         amd64        Provide CMake module to find eProsima FastRTPS.
+ii  ros-foxy-rmw-fastrtps-cpp                       1.3.2-1focal.20230527.045658         amd64        Implement the ROS middleware interface using eProsima FastRTPS static code generation in C++.
+ii  ros-foxy-rmw-fastrtps-shared-cpp                1.3.2-1focal.20230527.044759         amd64        Code shared on static and dynamic type support of rmw_fastrtps_cpp.
+ii  ros-foxy-rosidl-typesupport-fastrtps-c          1.0.4-1focal.20230527.042305         amd64        Generate the C interfaces for eProsima FastRTPS.
+ii  ros-foxy-rosidl-typesupport-fastrtps-cpp        1.0.4-1focal.20230527.042012         amd64        Generate the C++ interfaces for eProsima FastRTPS.
+=== Profile file exists? ===
+-rwxrw-rw- 1 carl carl 1086 Jun 26 05:11 /home/carl/fastrtps_profile.xml
+=== Test with profile ===
+/parameter_events
+/rosout
+END

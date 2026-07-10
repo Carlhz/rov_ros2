@@ -1,0 +1,14 @@
+[sudo] password for carl: Unbinding uvcvideo from 3-2:1.0...
+  Unbound
+auto_detach: 0
+
+=== Probing XU#4 via USB control transfers ===
+  sel= 0: ERR:-9
+
+=== Reading EP 0x87 ===
+
+Done
+
+Rebinding uvcvideo...
+  Rebound
+EXIT:0

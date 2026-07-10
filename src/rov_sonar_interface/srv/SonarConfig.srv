@@ -1,0 +1,21 @@
+# 全向声纳配置服务
+bool on_off              # true=开始扫描, false=停止扫描
+
+# 声纳参数
+int32 range              # 量程 1-200 米
+int32 start_gain         # 起始增益 0-40 dB
+int32 logf               # 声扩散系数 15/20/30/40
+int32 absorption         # 声吸收系数 (dB/100m)
+int32 sound_speed        # 声速 1300-1700 m/s
+int32 train_angle        # 扫描中心方位 0-3599 (0.1°单位)
+int32 sector_width       # 扇扫角度 0-3600 (0.1°单位), 3600=全向PPI
+int32 data_len           # 数据长度 (最大1000)
+int32 pulse_type         # 发射脉冲: 0=自动, 1=CW短, 2=CW长
+int32 gate               # 剖面门限 100-16000
+int32 min_range          # 最小距离(样点数)
+int32 delay_us           # 发射延时(us)
+int32 frequency          # 频率: 0=自动, 68=低频, 221=高频
+int32 rigidity_threshold # 刚性阈值
+---
+bool success
+string message

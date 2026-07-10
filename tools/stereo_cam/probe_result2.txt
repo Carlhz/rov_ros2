@@ -1,0 +1,23 @@
+========================================
+  PROBE 2: 在视频流运行时读取 IMU 数据
+========================================
+
+=== event5 capabilities ===
+/mnt/hgfs/CarlWS/rov_ros2/tools/stereo_cam/quick_probe2.sh: line 13: evtest: command not found
+evtest not available
+
+=== Starting video stream on /dev/video0 ===
+<<<<<<<<<<<<<<<<<<<<
+
+=== Reading /dev/input/event5 while streaming ===
+
+=== Reading /dev/hidraw0 while streaming ===
+
+=== Reading /dev/video1 while streaming ===
+VIDIOC_G_FMT: failed: Invalid argument
+Metadata file size: 0 bytes
+
+=== Stream output ===
+-rw-r--r-- 1 carl carl 601158 Jun 23 02:45 /tmp/test_stream.bin
+
+=== DONE ===

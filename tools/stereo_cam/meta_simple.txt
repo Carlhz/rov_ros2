@@ -1,0 +1,31 @@
+========================================
+  元数据捕获 (video + meta 同时运行)
+========================================
+
+[1] 启动 MJPEG 视频流...
+<<<<<<<<<<<<<<<<<<<<<<<<<<  视频流 PID: 2645
+
+[2] 读取 metadata...
+============================================================
+  UVC Metadata Direct Read (/dev/video1)
+============================================================
+Opening /dev/video1...
+  S_FMT failed: [Errno 16] Device or resource busy
+  Trying with default format...
+  REQBUFS failed: [Errno 22] Invalid argument
+  (Maybe metadata stream needs video stream to be active?)
+<< 26.78 fps
+<<
+Traceback (most recent call last):
+  File "/mnt/hgfs/CarlWS/rov_ros2/tools/stereo_cam/read_uvc_meta.py", line 166, in <module>
+    main()
+  File "/mnt/hgfs/CarlWS/rov_ros2/tools/stereo_cam/read_uvc_meta.py", line 160, in main
+    read_metadata("/dev/video1", num_bufs=3, frames=20)
+  File "/mnt/hgfs/CarlWS/rov_ros2/tools/stereo_cam/read_uvc_meta.py", line 148, in read_metadata
+    os.close(fd)
+OSError: [Errno 9] Bad file descriptor
+
+[3] 视频流完成
+-rw-r--r-- 1 carl carl 1062925 Jun 23 02:49 /tmp/vid_stream.bin
+
+=== DONE ===

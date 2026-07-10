@@ -1,0 +1,44 @@
+[sudo] password for carl: === YLX IMU EP 0x87 multi-strategy test ===
+
+YLX: usb_id=3-2, iface0=/sys/bus/usb/devices/3-2/3-2:1.0
+
+============================================================
+Strategy A: v4l2-ctl stream + libusb auto_detach + EP 0x87
+============================================================
+Starting v4l2-ctl --stream-mmap in background...
+  v4l2-ctl PID: 3139, running: True
+  auto_detach(1): 0
+  claim_interface(0): 0
+
+  Reading EP 0x87...
+
+============================================================
+Strategy B: Unbind uvcvideo + libusb direct + EP 0x87
+============================================================
+  Unbinding 3-2:1.0...
+  Unbound
+  claim_interface(0): 0
+
+  Reading EP 0x87 (5s)...
+
+  Rebinding uvcvideo...
+  Error: [Errno 16] Device or resource busy
+
+============================================================
+FAILED: No IMU data from EP 0x87
+
+The YLX camera IMU on Linux appears fundamentally different from Windows:
+  - On Windows: IMU data auto-pushes on EP 0x82 without activation
+  - On Linux: EP 0x87 never produces data regardless of:
+    * uvcvideo bound/unbound
+    * V4L2 streaming on/off
+    * XU#4 control queries (all return PIPE error)
+    * Direct libusb interrupt transfers
+
+Possible root causes:
+  1. Firmware detects OS and behaves differently (unlikely)
+  2. IMU needs a vendor-specific USB control command that only
+     the Windows driver sends during initialization
+  3. EP 0x82 (Windows) vs EP 0x87 (Linux) are different endpoints
+     -- need to verify Windows USBPcap capture for endpoint number
+============================================================

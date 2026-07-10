@@ -259,6 +259,94 @@ Ctrl+C 退出 sensor_monitor.py，再重新 python3 sensor_monitor.py
 
 当需要自定义消息类型或 `ros2 launch` 管理多节点时，再切 colcon 包即可。
 
+## 移植到新板子
+
+换新主控板（如换另一块 RK3588、树莓派、Jetson 等）时，核心工作只有三步：**确认串口 → 传代码 → 启动**。
+
+### 移植前提
+
+新板子需要具备：
+
+| 条件 | 检查方式 |
+|------|---------|
+| Linux 系统 | `uname -a` |
+| ROS2 已安装（含 rclpy） | `source /opt/ros/*/setup.bash && python3 -c "import rclpy"` |
+| Python 3 | `python3 --version` |
+| RS-485 串口可用 | `ls /dev/ttyS* /dev/ttyUSB* /dev/ttyAMA*` |
+| 与新上位机同网段 | `ping <上位机IP>` |
+
+### 移植步骤
+
+**1. 在新板子上确认串口名**
+
+```bash
+ls -la /dev/ttyS* /dev/ttyUSB* /dev/ttyAMA* 2>/dev/null
+
+# 不确定哪个是传感器？挨个试：
+python3 test_altimeter_raw.py    # 会遍历常见串口，找到有回复的
+```
+
+**2. 传代码到新板子**
+
+```bash
+# 方式 A：从 Git 仓库克隆
+git clone <你的仓库地址> /opt/ros/rov_ros2_ws/
+
+# 方式 B：scp 整个目录
+scp -r sensors/ rk3588/ vm/ root@<新板IP>:/opt/ros/rov_ros2_ws/
+```
+
+**3. 指定串口并启动**
+
+新板子的串口名如果不是 `ttyS3`/`ttyS5`，通过环境变量覆盖，**不需要改代码**：
+
+```bash
+cd /opt/ros/rov_ros2_ws/
+
+# 假设新板子深度计在 /dev/ttyUSB0，高度计在 /dev/ttyUSB1
+DEPTH_PORT=/dev/ttyUSB0 ALTI_PORT=/dev/ttyUSB1 ./start_sensors.sh bg
+```
+
+所有可覆盖的环境变量：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DEPTH_PORT` | `/dev/ttyS3` | 深度计串口 |
+| `ALTI_PORT` | `/dev/ttyS5` | 高度计串口 |
+| `ROS_DOMAIN_ID` | `42` | DDS 域 ID（新旧板子必须一致） |
+
+**4. 在新上位机上验证**
+
+```bash
+source /opt/ros/humble/setup.bash
+export ROS_DOMAIN_ID=42
+ros2 topic list | grep rov
+python3 vm/sensor_monitor.py
+```
+
+### 不需要做的事
+
+- ❌ 不需要重新编译（纯 Python，零依赖）
+- ❌ 不需要安装第三方 pip 包（只用 Python 内置模块）
+- ❌ 不需要改话题名或消息类型
+- ❌ 上位机监控脚本无需任何修改
+
+### 故障排查
+
+```bash
+# 串口无响应 → 物理测试
+python3 test_depth_raw.py        # 直读 MODBUS，不经过 ROS2
+python3 test_altimeter_raw.py    # 直读 AA/A0 协议
+
+# 话题可见但无数据 → 驱动日志
+cat /tmp/depth.log
+cat /tmp/alti.log
+
+# 上位机看不到 → 检查网段和 DOMAIN_ID
+ping <新板IP>
+echo $ROS_DOMAIN_ID              # 两端必须一致
+```
+
 ## 许可证
 
 MIT

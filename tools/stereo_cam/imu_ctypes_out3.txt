@@ -1,0 +1,6 @@
+[sudo] password for carl: libusb: libusb-1.0.so.0
+Found YLX camera: 1BCF:0B15
+Config descriptor: 937 bytes, 9 interfaces
+No interrupt IN endpoint found!
+No IMU endpoint found
+EXIT:1

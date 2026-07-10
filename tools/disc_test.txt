@@ -1,0 +1,4 @@
+=== Discovery Server Test ===
+/parameter_events
+/rosout
+END

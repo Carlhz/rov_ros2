@@ -1,0 +1,8 @@
+=================================================================
+  YLX Gyroscope Scanner V7
+  Target: APP1 (FFE1) segment = 3-axis gyro data
+  Format: 6 bytes, low 4 bits unused, 12-bit signed
+=================================================================
+
+Opened /dev/video0 (fd=3)
+  S_FMT failed: [Errno 25] Inappropriate ioctl for device

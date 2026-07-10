@@ -1,0 +1,33 @@
+[sudo] password for carl: === Probing XU#4 controls ===
+  XU#4 sel= 0: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel= 1: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel= 2: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel= 3: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel= 4: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel= 5: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel= 6: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel= 7: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel= 8: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel= 9: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=10: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=11: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=12: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=13: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=14: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=15: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=16: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=17: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=18: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=19: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=20: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=21: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=22: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=23: ERROR: [Errno 25] Inappropriate ioctl for device
+  XU#4 sel=24: ERROR: [Errno 25] Inappropriate ioctl for device
+
+=== Trying to start video stream ===
+STREAMON/OFF: [Errno 16] Device or resource busy
+
+=== Now trying to read EP 0x87 with stream active ===
+(Need to keep stream open while reading)
+EXIT:0

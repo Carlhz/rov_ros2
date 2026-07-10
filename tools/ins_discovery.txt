@@ -1,0 +1,4 @@
+=== Topic test ===
+/parameter_events
+/rosout
+END

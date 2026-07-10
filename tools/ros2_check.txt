@@ -1,0 +1,11 @@
+PING 172.16.28.82 (172.16.28.82) 56(84) bytes of data.
+64 bytes from 172.16.28.82: icmp_seq=1 ttl=128 time=0.571 ms
+64 bytes from 172.16.28.82: icmp_seq=2 ttl=128 time=0.616 ms
+
+--- 172.16.28.82 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1029ms
+rtt min/avg/max/mdev = 0.571/0.593/0.616/0.022 ms
+===
+/parameter_events
+/rosout
+END

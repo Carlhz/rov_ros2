@@ -18,3 +18,52 @@ log/
 # 压缩包
 *.zip
 *.tar.gz
+
+# 大文件 / 二进制
+*.exe
+*.dll
+*.so
+*.o
+
+# deploy 临时文件（源码在 rk3588/，deploy/ 只留 deploy_now.py）
+deploy/_*.py
+deploy/_*.sh
+deploy/_*.txt
+deploy/*.txt
+deploy/*.xml
+deploy/*.cmake
+deploy/*.sh
+deploy/rov_sonar_interfaceConfig.cmake
+deploy/if_cmake/
+deploy/final_test.py
+deploy/run_auto_test.py
+deploy/scp_deploy.py
+deploy/setup_discovery_server.py
+deploy/start_mc.sh
+deploy/check_rk3588_dds.py
+deploy/check_ros2.py
+deploy/deploy_fastrtps_rk3588.py
+deploy/deploy_unicast_dds.py
+deploy/fix_disc_server.py
+deploy/fix_rk3588_dds.py
+deploy/restart_ins_rk3588.py
+deploy/restart_ins_unicast.sh
+deploy/verify_rk3588.py
+!deploy/deploy_now.py
+!deploy/toolchain_aarch64.cmake
+!deploy/toolchain_aarch64_relaxed.cmake
+
+# 日志文件
+logs/
+*.log
+
+# CSV 测试数据（数据量大，不需要入库）
+test_data/
+*.csv
+
+# 遗留版本的备份文件
+*_v7.py
+*_simple.py
+*_minimal.py
+*_v411.py
+*_v318.py

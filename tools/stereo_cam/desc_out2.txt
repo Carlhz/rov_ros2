@@ -1,0 +1,6 @@
+=== lsusb -v ===
+sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper
+---
+=== /sys/kernel/debug/usb/devices ===
+sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper
+EXIT:1

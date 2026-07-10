@@ -1,0 +1,14 @@
+============================================================
+  UVC Metadata Final Probe
+============================================================
+
+  Trying metadata stream with 4 buffers...
+  REQBUFS failed: [Errno 22] Invalid argument
+Traceback (most recent call last):
+  File "/mnt/hgfs/CarlWS/rov_ros2/tools/stereo_cam/meta_probe_final.py", line 122, in <module>
+    main()
+  File "/mnt/hgfs/CarlWS/rov_ros2/tools/stereo_cam/meta_probe_final.py", line 117, in main
+    try_meta_stream(buf_count=bc, timeout=2.0)
+  File "/mnt/hgfs/CarlWS/rov_ros2/tools/stereo_cam/meta_probe_final.py", line 102, in try_meta_stream
+    os.close(fd)
+OSError: [Errno 9] Bad file descriptor

@@ -1,0 +1,13 @@
+=== nc test to DS ===
+nc: connect to 172.16.28.82 port 11811 (tcp) failed: No route to host
+EXIT: True
+=== iptables ===
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
+END

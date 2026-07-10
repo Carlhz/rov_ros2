@@ -1,0 +1,12 @@
+============================================================
+  UVC Metadata Direct Read (/dev/video1)
+============================================================
+Opening /dev/video1...
+Traceback (most recent call last):
+  File "/mnt/hgfs/CarlWS/rov_ros2/tools/stereo_cam/read_uvc_meta.py", line 164, in <module>
+    main()
+  File "/mnt/hgfs/CarlWS/rov_ros2/tools/stereo_cam/read_uvc_meta.py", line 158, in main
+    read_metadata("/dev/video1", num_bufs=3, frames=20)
+  File "/mnt/hgfs/CarlWS/rov_ros2/tools/stereo_cam/read_uvc_meta.py", line 34, in read_metadata
+    fmt_struct = struct.pack('I 4x 8x 4x 8x 4x 4I 4x',
+struct.error: pack expected 5 items for packing (got 8)

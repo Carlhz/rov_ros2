@@ -1,0 +1,31 @@
+=== IPs ===
+172.16.203.128 
+=== ROUTE ===
+default via 172.16.203.2 dev ens33 proto dhcp metric 100 
+172.16.203.0/24 dev ens33 proto kernel scope link src 172.16.203.128 metric 100 
+=== ROS_INTERFACE ===
+ 
+ 
+=== multicast route ===
+multicast 239.255.0.1 dev ens33 src 172.16.203.128 uid 1000 
+    cache <local,mc> 
+=== ifconfig ===
+ens33: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 172.16.203.128  netmask 255.255.255.0  broadcast 172.16.203.255
+        inet6 fe80::afef:907b:44a3:42fb  prefixlen 64  scopeid 0x20<link>
+        ether 00:0c:29:ae:8d:1f  txqueuelen 1000  (Ethernet)
+        RX packets 18465  bytes 15844510 (15.8 MB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 6798  bytes 1634796 (1.6 MB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+        inet 127.0.0.1  netmask 255.0.0.0
+        inet6 ::1  prefixlen 128  scopeid 0x10<host>
+        loop  txqueuelen 1000  (Local Loopback)
+        RX packets 559  bytes 66155 (66.1 KB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 559  bytes 66155 (66.1 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+END

@@ -1,0 +1,7 @@
+=== Fixed route ===
+172.16.28.82 via 172.16.203.2 dev ens33 src 172.16.203.128 uid 1000 
+    cache 
+=== nc test ===
+nc: connect to 172.16.28.82 port 11811 (tcp) failed: Connection refused
+nc failed
+END

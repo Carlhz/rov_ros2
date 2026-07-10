@@ -1,0 +1,15 @@
+============================================================
+  UVC Metadata Direct Read (/dev/video1)
+============================================================
+Opening /dev/video1...
+  Format set: type=13, buffersize=1024, fourcc='UVCH'
+  REQBUFS failed: [Errno 22] Invalid argument
+  (Maybe metadata stream needs video stream to be active?)
+Traceback (most recent call last):
+  File "/mnt/hgfs/CarlWS/rov_ros2/tools/stereo_cam/read_uvc_meta.py", line 166, in <module>
+    main()
+  File "/mnt/hgfs/CarlWS/rov_ros2/tools/stereo_cam/read_uvc_meta.py", line 160, in main
+    read_metadata("/dev/video1", num_bufs=3, frames=20)
+  File "/mnt/hgfs/CarlWS/rov_ros2/tools/stereo_cam/read_uvc_meta.py", line 148, in read_metadata
+    os.close(fd)
+OSError: [Errno 9] Bad file descriptor
