@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-ROV 手柄控制器 v5.3 (VM 端) — 纯指令转发 + 档位推力配比生效
+ROV 手柄控制器 v5.3.1 (VM 端) — 纯指令转发 + 档位推力配比生效
 深度PID + 姿态PID 已全部迁移至 motor_controller (RK3588 本地)
+
+v5.3.1 修复 (升档崩溃):
+  - 修复: 3档→4档(定深)升档瞬间 GEAR_PROFILES[self.gear] 索引越界(IndexError)
+    导致节点崩溃退出; 升到4档时改为直接显示定深提示, 不访问 GEAR_PROFILES
+  - 显示处 GEAR_PROFILES 访问统一加 min() 越界防御
 
 v5.3 改进 (手动档位动力配比重做):
   - 档位真正生效: 1/2/3 档按 GEAR_PROFILES 缩放 尾推(move)/升降(up)/侧推(yaw)
@@ -570,10 +575,10 @@ class JoyController(Node):
         # 标题行
         estop_mark = ' !!急停!!' if self.e_stopped else ''
         if is_dive_gear:
-            gear_txt = 'ROV-JOY v5.3 [4档/定深] PID@RK3588  {}'.format(estop_mark)
+            gear_txt = 'ROV-JOY v5.3.1 [4档/定深] PID@RK3588  {}'.format(estop_mark)
         else:
-            m_s, u_s, y_s = GEAR_PROFILES[self.gear]
-            gear_txt = 'ROV-JOY v5.3 档位{}/3  尾{:3.0f}% 升{:3.0f}% 侧{:3.0f}%  {}'.format(
+            m_s, u_s, y_s = GEAR_PROFILES[min(self.gear, len(GEAR_PROFILES) - 1)]
+            gear_txt = 'ROV-JOY v5.3.1 档位{}/3  尾{:3.0f}% 升{:3.0f}% 侧{:3.0f}%  {}'.format(
                 self.gear + 1, m_s * 100, u_s * 100, y_s * 100, estop_mark)
 
         # 深度行
@@ -803,10 +808,14 @@ class JoyController(Node):
             if self._debounce_btn(btn_arr, self._last_btns if hasattr(self, '_last_btns') else [0]*11, BTN_RB):
                 if self.gear < GEAR_DIVE:
                     self.gear += 1
-                    m_s, u_s, y_s = GEAR_PROFILES[self.gear]
-                    msg = '升档 -> 4档[定深] 按Y开关悬停' if self.gear == GEAR_DIVE else \
-                          '升档 -> {}/3档 (尾{:3.0f}% 升{:3.0f}% 侧{:3.0f}%)'.format(
-                              self.gear+1, m_s*100, u_s*100, y_s*100)
+                    # v5.3.1 修复: 升到4档时 self.gear=3, GEAR_PROFILES 无索引3,
+                    # 直接进入定深提示分支, 避免 IndexError 导致节点崩溃退出
+                    if self.gear == GEAR_DIVE:
+                        msg = '升档 -> 4档[定深] 按Y开关悬停'
+                    else:
+                        m_s, u_s, y_s = GEAR_PROFILES[self.gear]
+                        msg = '升档 -> {}/3档 (尾{:3.0f}% 升{:3.0f}% 侧{:3.0f}%)'.format(
+                            self.gear+1, m_s*100, u_s*100, y_s*100)
                     self._set_status(msg, 3.0)
                     self._publish_state('gear', '{}档'.format(self.gear+1))
             if self._debounce_btn(btn_arr, self._last_btns if hasattr(self, '_last_btns') else [0]*11, BTN_LB):
