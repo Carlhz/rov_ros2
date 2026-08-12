@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-ROV 电机控制器 v8.5 (RK3588 端) — 增强下潜推力 + 可调Yaw PD + CAN恢复 + INS速度
+ROV 电机控制器 v8.6 (RK3588 端) — 手动模式动力重做 + 增强下潜推力 + 可调Yaw PD + CAN恢复
+
+v8.6 改进 (手动遥控动力分配重做):
+  - 转向增强: 手动模式 YAW_MANUAL_TRIM 0.10→0.60 (ID7 满量程 1130→1280 RPM),
+    尾推Yaw参与比例 0.5→0.6 (手动专属), 转向力矩大幅提升
+  - 手动下潜同步增强: 手动垂直增益与定深阶段1对齐 (尾推 1180→1250, 垂推 1400→1480 RPM),
+    上浮推力保持不变 (方向不对称增益)
+  - 手动/自动增益分离: 定深/定航向逻辑完全不受影响
+    YAW_MANUAL_TRIM_AUTO=0.10 / TAIL_YAW_RATIO_AUTO=0.5 与 v8.5 完全一致
 
 v8.5 改进:
   - 机器人重量减轻, 浮力增大, 原推力不足以实现下潜
@@ -108,10 +116,15 @@ YAW_RPM_MIN   = 1100
 YAW_RPM_MAX   = 1400  # v7.1 定航向大误差回正
 
 # ── 推力增益 ─────────────────────────────────────────────────────
-FZ_GAIN_TAIL  = 0.178  # 尾推垂直增益 (fz=1.0→1180RPM, 倾角22.5deg)
-FZ_GAIN_VERT  = 0.667  # 垂推增益 (fz=1.0→1400RPM, 纯垂直)
+FZ_GAIN_TAIL  = 0.178  # 尾推垂直增益 (fz=1.0→1180RPM, 倾角22.5deg) — 定深PID阶段2使用
+FZ_GAIN_VERT  = 0.667  # 垂推增益 (fz=1.0→1400RPM, 纯垂直) — 定深PID阶段2使用
 TAIL_DIVE_MIN = 0.223  # v8.5: 尾推下潜最低norm (→1200RPM, 克服浮力)
 VERT_DIVE_MIN = 0.556  # v8.5: 垂推下潜最低norm (→1350RPM, 克服浮力)
+
+# v8.6: 手动模式垂直增益 — 方向不对称 (下潜增强, 上浮保持v8.5)
+# 下潜满量程与定深阶段1一致 (尾推1250/垂推1480 RPM), 上浮沿用 FZ_GAIN_* (1180/1400 RPM)
+MANUAL_DIVE_FZ_TAIL = 0.334   # 手动下潜尾推 → 1250 RPM
+MANUAL_DIVE_FZ_VERT = 0.845   # 手动下潜垂推 → 1480 RPM
 
 # ── v7.0: 两阶段深度控制 ─────────────────────────────────────────
 DEPTH_FIXED_THRESHOLD = 0.10  # 误差超过此值 → 固定推力阶段
@@ -158,11 +171,13 @@ YAW_I_MAX      = 0.50  # 积分限幅 (当前KI=0不使用)
 YAW_DEADBAND   = 0.15  # 死区 ±0.15° (目标±1°)
 YAW_I_GATE     = 2.0   # 积分门控 (当前KI=0不使用)
 YAW_I_DECAY    = 0.85
-YAW_MANUAL_TRIM = 0.10
+YAW_MANUAL_TRIM_MANUAL = 0.60  # v8.6: 手动模式转向增益 (满量程→ID7 1280RPM, 灵敏响应)
+YAW_MANUAL_TRIM_AUTO   = 0.10  # v8.6: 定深模式偏置微调 (与v8.5一致, 不影响定深)
 YAW_ATT_TIMEOUT = 1.0
 YAW_HOLD_THRESHOLD = 10.0  # v7.1: 定航向大误差阈值(度), 超此值大转速回正
 YAW_DIRECTION = -1  # v7.4: ID7物理方向修正 (+1=正转右转, -1=正转左转)
-TAIL_YAW_RATIO  = 0.5    # v7.3: 尾推Yaw参与比例 (力平衡最优=0.707, 但RPM约束选0.5)
+TAIL_YAW_RATIO_AUTO   = 0.5    # v7.3: 尾推Yaw参与比例 (定深/定航向, 力平衡最优=0.707, RPM约束选0.5)
+TAIL_YAW_RATIO_MANUAL = 0.6    # v8.6: 尾推Yaw参与比例 (手动模式, 增强转向)
 
 # ── pitch 安全 (防翻覆) ──────────────────────────────────────────
 PITCH_SAFE     = 30     # 开始降推的角度
@@ -1054,8 +1069,11 @@ class MotorController(Node):
 
         # Mz: 定航向优先 → 定深PID阶段 → 手动偏航
         # v7.7: YAW_DIRECTION 只修正 PID 输出, 不翻转子动手动 steering 方向
-        # v7.3: 尾推参与Yaw (B+自动分配差速), 按TAIL_YAW_RATIO缩放, ID7主控
-        manual_yaw = self.last_yaw * YAW_MANUAL_TRIM
+        # v8.6: 手动/自动增益分离 — 手动转向增强(0.60), 定深偏置保持(0.10)
+        if self.last_dive_flag > 0.1:
+            manual_yaw = self.last_yaw * YAW_MANUAL_TRIM_AUTO
+        else:
+            manual_yaw = self.last_yaw * YAW_MANUAL_TRIM_MANUAL
         if self.yaw_hold_active:
             self.yaw_target = self.yaw_hold_target
             if self.ins_att_valid:
@@ -1083,8 +1101,12 @@ class MotorController(Node):
             mz_id7 = manual_yaw
             # 手动模式: 不应用 YAW_DIRECTION, 保持手柄原始方向
 
-        # v7.3: 尾推Yaw辅助 — 通过 B+ 自动分配差速, 按TAIL_YAW_RATIO缩放
-        mz_tail = mz_id7 * TAIL_YAW_RATIO
+        # v7.3: 尾推Yaw辅助 — 通过 B+ 自动分配差速, 按尾推Yaw比例缩放
+        # v8.6: 手动模式用增强比例0.6, 定深/定航向保持0.5 (不影响既有自动逻辑)
+        if self.yaw_hold_active or self.last_dive_flag > 0.1:
+            mz_tail = mz_id7 * TAIL_YAW_RATIO_AUTO
+        else:
+            mz_tail = mz_id7 * TAIL_YAW_RATIO_MANUAL
 
         # ── 推力分配 (伪逆矩阵 B+ 解算, 尾推含缩放Yaw, ID7独立) ──
         # Fz 不通过分配器 (避免尾推抵消垂推), 直接控制 ID5/ID6
@@ -1124,9 +1146,15 @@ class MotorController(Node):
                     fz_tail = max(fz_tail, TAIL_DIVE_MIN)  # v8.5: 保底1200RPM
                     fz_vert = max(fz_vert, VERT_DIVE_MIN)  # v8.5: 保底1350RPM
         else:
-            # 手动模式或无深度数据: 沿用原始 fz
-            fz_tail = fz * FZ_GAIN_TAIL
-            fz_vert = fz * FZ_GAIN_VERT
+            # 手动模式或无深度数据: 方向不对称垂直增益 (v8.6)
+            # 下潜 → 增强至与定深阶段1一致 (尾推1250/垂推1480 RPM)
+            # 上浮 → 保持v8.5增益不变 (1180/1400 RPM, 机器人变轻上浮更容易)
+            if fz >= 0:
+                fz_tail = fz * MANUAL_DIVE_FZ_TAIL
+                fz_vert = fz * MANUAL_DIVE_FZ_VERT
+            else:
+                fz_tail = fz * FZ_GAIN_TAIL
+                fz_vert = fz * FZ_GAIN_VERT
 
         # 下潜/上浮时尾推不参与Yaw-pitch耦合, 保持4电机转速一致
         if abs(fz_tail) > 0.001:
@@ -1196,7 +1224,7 @@ class MotorController(Node):
                 mode_tag = 'MANUAL'
                 err = 0.0
             self.get_logger().info(
-                'v8.5 {}{} | 深={}/tar={:.2f} err={:+.3f}m pit={:.1f}° rol={:.1f}° yaw={:.1f}° | '
+                'v8.6 {}{} | 深={}/tar={:.2f} err={:+.3f}m pit={:.1f}° rol={:.1f}° yaw={:.1f}° | '
                 'fz={:+.3f} mx={:+.3f} my={:+.3f} mz={:+.3f} | '
                 'T={:+d} {:+d} {:+d} {:+d} V={:+d} {:+d} Y={:+d}{}{}'.format(
                     mode_tag, yh_tag, d_str, self.target_depth, err,

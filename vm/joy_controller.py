@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-ROV 手柄控制器 v5.2 (VM 端) — 简化为纯指令转发
+ROV 手柄控制器 v5.3 (VM 端) — 纯指令转发 + 档位推力配比生效
 深度PID + 姿态PID 已全部迁移至 motor_controller (RK3588 本地)
+
+v5.3 改进 (手动档位动力配比重做):
+  - 档位真正生效: 1/2/3 档按 GEAR_PROFILES 缩放 尾推(move)/升降(up)/侧推(yaw)
+  - 1档精细操控: 尾45% 升55% 侧50% | 2档巡航: 尾70% 升78% 侧75% | 3档全速: 100%
+  - 定深模式(4档+悬停开启)不缩放, 原样转发 — 不影响定深既有逻辑
+  - 配合 motor_controller v8.6 手动增益增强 (转向0.6/下潜同定深阶段1)
 
 v5.0 重大简化:
   - 删除所有PID代码（深度/roll/pitch/yaw → 已移入 motor_controller v4.0）
@@ -12,10 +18,10 @@ v5.0 重大简化:
 
 数据流:
   VM → /rov/cmd_vel (Twist):
-    linear.x  = move         前进/后退 (-1~+1)
+    linear.x  = move         前进/后退 (-1~+1, 按档位缩放)
     linear.y  = dive_flag    定深标志 (0或1)
-    linear.z  = target_depth 目标深度(米) / 手动up_norm
-    angular.z = yaw_trim     手动偏航 (-1~+1)
+    linear.z  = target_depth 目标深度(米) / 手动up_norm(按档位缩放)
+    angular.z = yaw_trim     手动偏航 (-1~+1, 按档位缩放)
 
 设备: Logitech F710 (D模式 / DirectInput)
   左摇杆 Y (axis[5])  → 上浮/下潜
@@ -61,7 +67,7 @@ BTN_LT    = 6   # 图里 [6] 对应 LT（暂未使用）
 BTN_RT    = 7   # 图里 [7] 对应 RT，切换水下灯
 
 # ── 速度档位 ───────────────────────────────────────────────
-SPEED_GEARS  = [1200, 1400, 1600]
+SPEED_GEARS  = [1200, 1400, 1600]   # 显示用 (仅参考)
 GEAR_DIVE    = 3
 DIVE_FLAG_VAL = 1.0            # 定深标志 (linear.y)
 DEFAULT_GEAR = 0
@@ -70,6 +76,19 @@ JS_DEVICE    = '/dev/input/js0'
 AXIS_MAX     = 32767.0
 MAX_RPM      = 1800
 MIN_RPM      = 1100
+
+# ── 手动档位推力配比 (v5.3: 档位真正生效) ────────────────────
+# 三元组 (尾推move, 升降up, 侧推yaw) 的满量程缩放系数:
+#   1档: 精细操控  尾45%  升55%  侧50%
+#   2档: 巡航      尾70%  升78%  侧75%
+#   3档: 全速      100%   100%   100%
+# 档位间线性递进: move 0.45→0.70→1.00, up 0.55→0.78→1.00, yaw 0.50→0.75→1.00
+# 定深模式(4档+悬停开启)不缩放, 维持原样转发
+GEAR_PROFILES = [
+    (0.45, 0.55, 0.50),
+    (0.70, 0.78, 0.75),
+    (1.00, 1.00, 1.00),
+]
 
 # ── 深度悬停参数 ───────────────────────────────────────────
 DEFAULT_TARGET   = 0.5          # 默认目标深度
@@ -267,12 +286,12 @@ class JoyController(Node):
         self.create_timer(0.05, self.heartbeat_timer)
 
         self.get_logger().info('=' * 60)
-        self.get_logger().info('  ROV 手柄控制器 v5.2 — 纯指令转发 (PID在RK3588本地)')
+        self.get_logger().info('  ROV 手柄控制器 v5.3 — 纯指令转发 + 档位推力配比 (PID在RK3588本地)')
         self.get_logger().info('  定深: linear.z=target_depth(米), linear.y=flag')
         self.get_logger().info('  档位: 4档=定深, 1~3档=手动  RT:切换水下灯')
         self.get_logger().info('  设备: {}'.format(JS_DEVICE))
         self.get_logger().info('=' * 60)
-        self._publish_state('ready', 'v5.2 纯指令转发就绪')
+        self._publish_state('ready', 'v5.3 档位配比生效')
 
     # ═══════════════════════════════════════════════════
     # 回调: 从 motor_state 获取所有状态
@@ -551,11 +570,11 @@ class JoyController(Node):
         # 标题行
         estop_mark = ' !!急停!!' if self.e_stopped else ''
         if is_dive_gear:
-            gear_txt = 'ROV-JOY v5.0 [4档/定深] PID@RK3588  {}'.format(estop_mark)
+            gear_txt = 'ROV-JOY v5.3 [4档/定深] PID@RK3588  {}'.format(estop_mark)
         else:
-            max_r = SPEED_GEARS[self.gear]
-            gear_txt = 'ROV-JOY v5.0 档位{}/3  尾{:4d}  垂{:4d}  {}'.format(
-                self.gear + 1, max_r, min(max_r + 600, MAX_RPM), estop_mark)
+            m_s, u_s, y_s = GEAR_PROFILES[self.gear]
+            gear_txt = 'ROV-JOY v5.3 档位{}/3  尾{:3.0f}% 升{:3.0f}% 侧{:3.0f}%  {}'.format(
+                self.gear + 1, m_s * 100, u_s * 100, y_s * 100, estop_mark)
 
         # 深度行
         d_cur = '{:5.2f}'.format(self.current_depth) if self.depth_valid else '--.--'
@@ -784,8 +803,10 @@ class JoyController(Node):
             if self._debounce_btn(btn_arr, self._last_btns if hasattr(self, '_last_btns') else [0]*11, BTN_RB):
                 if self.gear < GEAR_DIVE:
                     self.gear += 1
+                    m_s, u_s, y_s = GEAR_PROFILES[self.gear]
                     msg = '升档 -> 4档[定深] 按Y开关悬停' if self.gear == GEAR_DIVE else \
-                          '升档 -> {}/3档 ({}rpm)'.format(self.gear+1, SPEED_GEARS[self.gear])
+                          '升档 -> {}/3档 (尾{:3.0f}% 升{:3.0f}% 侧{:3.0f}%)'.format(
+                              self.gear+1, m_s*100, u_s*100, y_s*100)
                     self._set_status(msg, 3.0)
                     self._publish_state('gear', '{}档'.format(self.gear+1))
             if self._debounce_btn(btn_arr, self._last_btns if hasattr(self, '_last_btns') else [0]*11, BTN_LB):
@@ -821,10 +842,23 @@ class JoyController(Node):
         is_dive_gear = (self.gear == GEAR_DIVE)
 
         # ═══════════════════════════════════════════════════
+        # v5.3: 手动档位推力配比 — 档位真正缩放输出
+        # 定深模式(悬停开启)原样转发, 不缩放, 不影响定深既有逻辑
+        # 4档但未开悬停 → 按3档全量配比 (全力操控)
+        # ═══════════════════════════════════════════════════
+        if is_dive_gear and self.depth_hold_on:
+            move_s, up_s, yaw_s = move, up, yaw
+        else:
+            m_scale, u_scale, y_scale = GEAR_PROFILES[min(self.gear, len(GEAR_PROFILES) - 1)]
+            move_s = move * m_scale
+            up_s   = up   * u_scale
+            yaw_s  = yaw  * y_scale
+
+        # ═══════════════════════════════════════════════════
         # v5.0: 构建 Twist — 纯指令转发
         # ═══════════════════════════════════════════════════
         twist = Twist()
-        twist.linear.x  = float(move)        # 前进/后退
+        twist.linear.x  = float(move_s)        # 前进/后退 (按档位缩放)
 
         # 修正: 4档仅当悬停开启时才发送 dive_flag=1
         # 防止用户切换到4档但未按Y时, motor_controller 进入定深模式(target_depth=0)
@@ -834,14 +868,14 @@ class JoyController(Node):
         elif is_dive_gear:
             # 4档但未开启悬停: 当作手动模式, 允许手柄垂直控制
             twist.linear.y = 0.0
-            twist.linear.z = float(up)       # 手动垂直推力
+            twist.linear.z = float(up_s)       # 手动垂直推力 (按档位缩放)
         else:
             twist.linear.y = 0.0             # 手动模式
-            twist.linear.z = float(up)       # 手动垂直推力
+            twist.linear.z = float(up_s)     # 手动垂直推力 (按档位缩放)
 
         twist.angular.x = 1.0 if self.yaw_hold_on else 0.0  # 定航向标志
         twist.angular.y = float(self.yaw_hold_target) if self.yaw_hold_on else 0.0  # 目标航向(度)
-        twist.angular.z = float(yaw)          # 手动偏航偏置
+        twist.angular.z = float(yaw_s)          # 手动偏航偏置 (按档位缩放)
         self.cmd_pub.publish(twist)
 
         # ═══════════════════════════════════════════════════
@@ -885,7 +919,7 @@ class JoyController(Node):
         # ═══════════════════════════════════════════════════
         btn_names = ['X', 'A', 'B', 'Y', 'LB', 'RB', 'LT', 'RT']
         active = [btn_names[i] for i in range(8) if btns.get(i, 0)]
-        self._display_status(-move, yaw,   # v5.1: 取反使前进时条形向右填充
+        self._display_status(-move_s, yaw_s,   # v5.3: 显示缩放后实际输出 (取反使前进时条形向右填充)
                              self.target_depth if self.depth_hold_on else 0.0,
                              active, is_dive_gear=is_dive_gear)
 
