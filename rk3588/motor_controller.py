@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-ROV 电机控制器 v8.0 (RK3588 端) — YAW_DIRECTION只修正PID + 深度前馈补偿(FF_GAIN=0禁用)
+ROV 电机控制器 v8.5 (RK3588 端) — 增强下潜推力 + 可调Yaw PD + CAN恢复 + INS速度
+
+v8.5 改进:
+  - 机器人重量减轻, 浮力增大, 原推力不足以实现下潜
+  - 下潜固定推力阶段: 尾推 1180→1250 RPM, 垂推 1405→1480 RPM
+  - PID阶段保底推力: 尾推 1140→1200 RPM, 垂推 1250→1350 RPM
+  - 深度PID: Kp 2.0→2.5, I_MAX 0.30→0.40 (适应更大浮力补偿需求)
+  - 推力平衡: 尾推/垂推比值保持~0.84, 尾推垂直分量占比39%不变, 无倾斜/偏航风险
+  - 上浮推力保持不变 (机器人变轻, 上浮更容易)
 
 v7.7 改进:
   - YAW_DIRECTION 只应用于 PID 输出 (定航向 + 定深阶段), 手动 steering 不翻转发方向
@@ -33,8 +41,8 @@ v7.1 改进:
 
 v7.0 改进:
   - 两阶段深度控制: 固定推力阶段 + PID精细控制阶段
-  - 阶段1 (误差 > 0.30m): 下潜尾推1180/垂推1405, 上浮尾推1180/垂推1400
-  - 阶段2 (误差 ≤ 0.30m): PID 精细控制, 稳定悬浮
+  - 阶段1 (误差 > 0.10m): 下潜尾推1250/垂推1480, 上浮尾推1180/垂推1400
+  - 阶段2 (误差 ≤ 0.10m): PID 精细控制, 稳定悬浮
   - 尾推绝对值不超过垂推, 支持正负双向
 
 6-DOF 控制:
@@ -102,20 +110,20 @@ YAW_RPM_MAX   = 1400  # v7.1 定航向大误差回正
 # ── 推力增益 ─────────────────────────────────────────────────────
 FZ_GAIN_TAIL  = 0.178  # 尾推垂直增益 (fz=1.0→1180RPM, 倾角22.5deg)
 FZ_GAIN_VERT  = 0.667  # 垂推增益 (fz=1.0→1400RPM, 纯垂直)
-TAIL_DIVE_MIN = 0.089  # 尾推下潜最低norm (→1140RPM, 克服浮力)
-VERT_DIVE_MIN = 0.333  # 垂推下潜最低norm (→1250RPM, 克服浮力)
+TAIL_DIVE_MIN = 0.223  # v8.5: 尾推下潜最低norm (→1200RPM, 克服浮力)
+VERT_DIVE_MIN = 0.556  # v8.5: 垂推下潜最低norm (→1350RPM, 克服浮力)
 
 # ── v7.0: 两阶段深度控制 ─────────────────────────────────────────
 DEPTH_FIXED_THRESHOLD = 0.10  # 误差超过此值 → 固定推力阶段
-DIVE_TAIL_NORM = 0.178   # 下潜尾推 → 1180 RPM
-DIVE_VERT_NORM = 0.678   # 下潜垂推 → 1405 RPM (稍大克服浮力)
-SURF_TAIL_NORM = 0.178   # 上浮尾推 → 1180 RPM
-SURF_VERT_NORM = 0.667   # 上浮垂推 → 1400 RPM
+DIVE_TAIL_NORM = 0.334   # v8.5: 下潜尾推 → 1250 RPM (增推克服浮力)
+DIVE_VERT_NORM = 0.845   # v8.5: 下潜垂推 → 1480 RPM
+SURF_TAIL_NORM = 0.178   # 上浮尾推 → 1180 RPM (不变, 上浮更容易)
+SURF_VERT_NORM = 0.667   # 上浮垂推 → 1400 RPM (不变)
 
 # ── 深度 PID ─────────────────────────────────────────────────────
-DEPTH_KP       = 2.0
+DEPTH_KP       = 2.5    # v8.5: 2.0→2.5 (更快响应, 适应增大浮力)
 DEPTH_KI       = 0.10
-DEPTH_I_MAX    = 0.30
+DEPTH_I_MAX    = 0.40   # v8.5: 0.30→0.40 (更大积分裕度补偿稳态浮力)
 DEPTH_I_GATE   = 0.50   # 超过此误差不积分
 DEPTH_I_DECAY  = 0.85
 DEPTH_DEADBAND = 0.05   # 5cm 死区
@@ -137,12 +145,18 @@ PITCH_DBAND   = 1.5     # 度 (增大死区)
 PITCH_I_GATE  = 5.0     # 度
 PITCH_I_DECAY = 0.85
 
-# ── Yaw PID ──────────────────────────────────────────────────────
-YAW_KP         = 0.15  # v7.6: 2.5x增益, 1°误差→RPM 1145, 3°→1355
-YAW_KI         = 0.06  # v7.6: 3x积分, 快速积累对抗恒定偏转
-YAW_I_MAX      = 0.50  # v7.6: 提升上限, I最大贡献RPM 150→1250
-YAW_DEADBAND   = 0.15  # v7.6: 收紧死区 ±0.15° (目标±1°)
-YAW_I_GATE     = 2.0   # v7.6: 降低门控, 更快积分
+# ── Yaw PD 控制器 (v8.4: 可调PD, I=0起调) ──────────────────────────
+# PD 公式: mz = KP * err + KD * (err - last_err)/dt
+# 映射: mz→ID7 RPM = norm_to_rpm(mz, 1100, 1400)
+#   mz=0    → ID7=1100 (停转)
+#   mz=0.5  → ID7=1250
+#   mz=1.0  → ID7=1400
+YAW_KP         = 0.5   # v8.4: 大幅提升比例增益 (1°误差→mz=0.5→ID7=1250)
+YAW_KD         = 0.3   # v8.4: 微分增益 (阻尼震荡, 先设KD/KP≈0.6)
+YAW_KI         = 0.0   # v8.4: 积分置零, 先用纯PD验证
+YAW_I_MAX      = 0.50  # 积分限幅 (当前KI=0不使用)
+YAW_DEADBAND   = 0.15  # 死区 ±0.15° (目标±1°)
+YAW_I_GATE     = 2.0   # 积分门控 (当前KI=0不使用)
 YAW_I_DECAY    = 0.85
 YAW_MANUAL_TRIM = 0.10
 YAW_ATT_TIMEOUT = 1.0
@@ -308,12 +322,22 @@ def mix_thrust_manual(move_norm, up_norm, yaw_norm, roll_norm=0.0, pitch_norm=0.
 # ── 全局 CAN socket ──────────────────────────────────────────────
 _can_sock = None
 _can_lock = threading.Lock()
+_can_fail_count = 0       # 连续发送失败计数
+_can_recovering = False   # 是否正在恢复中
+_CAN_MAX_FAILS = 3        # 连续失败多少次后重建 socket
 
 
 def can_init():
     """初始化 CAN socket, 发送使能帧"""
-    global _can_sock
+    global _can_sock, _can_fail_count, _can_recovering
+    _can_fail_count = 0
+    _can_recovering = False
     try:
+        if _can_sock is not None:
+            try:
+                _can_sock.close()
+            except Exception:
+                pass
         _can_sock = socket.socket(socket.PF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
         _can_sock.bind((CAN_INTERFACE,))
     except Exception as e:
@@ -335,14 +359,49 @@ def can_init():
     return True
 
 
+def can_recover():
+    """CAN 通信恢复: 关闭旧 socket, 重新初始化"""
+    global _can_recovering
+    with _can_lock:
+        if _can_recovering:
+            return False  # 已有恢复在进行
+        _can_recovering = True
+    
+    print('[CAN] 尝试恢复 CAN 通信...')
+    # 关闭旧 socket
+    global _can_sock
+    if _can_sock is not None:
+        try:
+            _can_sock.close()
+        except Exception:
+            pass
+        _can_sock = None
+    
+    # 尝试重启 CAN 接口 (bus-off 恢复)
+    import subprocess
+    try:
+        subprocess.run(['ip', 'link', 'set', CAN_INTERFACE, 'restart'],
+                       timeout=2, capture_output=True)
+        time.sleep(0.2)
+    except Exception:
+        pass
+    
+    # 重新初始化 socket
+    ok = can_init()
+    
+    with _can_lock:
+        _can_recovering = False
+    return ok
+
+
 def can_close():
     global _can_sock
     with _can_lock:
         if _can_sock is not None:
             try:
                 zero = bytes(8)
-                send_can_frame(CAN_FRAME_200, zero)
-                send_can_frame(CAN_FRAME_201, zero)
+                _can_sock.send(struct.pack('=IB3x8s', CAN_FRAME_200 & 0x1FFFFFFF, 8, zero))
+                _can_sock.send(struct.pack('=IB3x8s', CAN_FRAME_201 & 0x1FFFFFFF, 8, zero))
             except Exception:
                 pass
             try:
@@ -353,18 +412,34 @@ def can_close():
 
 
 def send_can_frame(can_id, data):
-    global _can_sock
+    """发送 CAN 帧, 带错误恢复"""
+    global _can_sock, _can_fail_count
     with _can_lock:
         if _can_sock is None:
-            return
+            _can_fail_count += 1  # socket 不存在也算失败
+            raise OSError('CAN socket is None')
         frame = struct.pack('=IB3x8s', can_id & 0x1FFFFFFF, 8, data)
-        _can_sock.send(frame)
+        try:
+            _can_sock.send(frame)
+            _can_fail_count = 0  # 发送成功, 重置计数
+        except OSError:
+            _can_fail_count += 1
+            raise  # 重新抛出, 让调用方知道
 
 
 def send_motor_rpm(g_motor):
-    """发送所有电机 RPM"""
-    send_can_frame(CAN_FRAME_200, build_ctrl_200(g_motor))
-    send_can_frame(CAN_FRAME_201, build_ctrl_201(g_motor))
+    """发送所有电机 RPM, 带 CAN 错误恢复"""
+    global _can_fail_count
+    try:
+        send_can_frame(CAN_FRAME_200, build_ctrl_200(g_motor))
+        send_can_frame(CAN_FRAME_201, build_ctrl_201(g_motor))
+    except (OSError, Exception):
+        # CAN 发送失败或 socket 为 None, 尝试恢复
+        if _can_fail_count >= _CAN_MAX_FAILS and not _can_recovering:
+            # 在新线程中恢复, 避免阻塞心跳
+            import threading
+            t = threading.Thread(target=can_recover, daemon=True)
+            t.start()
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -389,6 +464,17 @@ class MotorController(Node):
         self.ins_roll       = 0.0
         self.ins_att_valid  = False
         self.last_att_time  = 0.0
+
+        # v8.1: INS 加速度 + 角速度 (用于 CSV 记录)
+        self.ins_ax = 0.0
+        self.ins_ay = 0.0
+        self.ins_az = 0.0
+        self.ins_wx = 0.0
+        self.ins_wy = 0.0
+        self.ins_wz = 0.0
+        self.ins_ve = 0.0
+        self.ins_vn = 0.0
+        self.ins_vd = 0.0
 
         self.current_depth     = 0.0
         self.filtered_depth    = 0.0
@@ -417,12 +503,14 @@ class MotorController(Node):
         self.pitch_pid_out   = 0.0
 
         # ═══════════════════════════════════════════════════
-        # v4.0: Yaw PID 状态
+        # v4.0: Yaw PD 状态 (v8.4: PID→PD, KI=0)
         # ═══════════════════════════════════════════════════
         self.yaw_target      = 0.0
         self.yaw_captured    = False
         self.yaw_err_i       = 0.0
         self.yaw_pid_out     = 0.0   # 归一化 [-1,+1]
+        self._last_yaw_err   = None  # v8.4: PD 微分需要上次误差
+        self.last_yaw_pid_time = time.time()  # v8.4: PD 微分需要 dt
 
         # ── v7.0: 独立定航向 ──
         self.yaw_hold_active = False
@@ -452,19 +540,24 @@ class MotorController(Node):
         self.last_cmd_time = time.time()
 
         self.get_logger().info('=' * 60)
-        self.get_logger().info('  ROV 电机控制器 v8.0 (深度前馈补偿)')
+        self.get_logger().info('  ROV 电机控制器 v8.5 (增强下潜推力+Yaw PD + CAN恢复+健康监控+INS速度)')
         self.get_logger().info('=' * 60)
         self.get_logger().info('  分配: B+ (7x6) | 4 PID: depth/roll/pitch/yaw')
         self.get_logger().info('  尾推: {}-{}rpm  垂推: {}-{}rpm  横推: {}-{}rpm'.format(
             TAIL_RPM_MIN, TAIL_RPM_MAX, VERT_RPM_MIN, VERT_RPM_MAX, YAW_RPM_MIN, YAW_RPM_MAX))
         self.get_logger().info('  Depth PID: Kp={} Ki={} Imax={} deadband={:.2f}m'.format(
             DEPTH_KP, DEPTH_KI, DEPTH_I_MAX, DEPTH_DEADBAND))
+        self.get_logger().info('  Dive thrust: tail={}rpm vert={}rpm | PID min: tail={}rpm vert={}rpm'.format(
+            norm_to_rpm(DIVE_TAIL_NORM, TAIL_RPM_MIN, TAIL_RPM_MAX),
+            norm_to_rpm(DIVE_VERT_NORM, VERT_RPM_MIN, VERT_RPM_MAX),
+            norm_to_rpm(TAIL_DIVE_MIN, TAIL_RPM_MIN, TAIL_RPM_MAX),
+            norm_to_rpm(VERT_DIVE_MIN, VERT_RPM_MIN, VERT_RPM_MAX)))
         self.get_logger().info('  Roll PID:  Kp={} Ki={} deadband={:.1f}deg'.format(
             ROLL_KP, ROLL_KI, ROLL_DBAND))
         self.get_logger().info('  Pitch PID: Kp={} Ki={} deadband={:.1f}deg'.format(
             PITCH_KP, PITCH_KI, PITCH_DBAND))
-        self.get_logger().info('  Yaw PID:   Kp={} Ki={} deadband={:.1f}deg'.format(
-            YAW_KP, YAW_KI, YAW_DEADBAND))
+        self.get_logger().info('  Yaw PD:    Kp={} Kd={} Ki={} deadband={:.2f}deg'.format(
+            YAW_KP, YAW_KD, YAW_KI, YAW_DEADBAND))
         self.get_logger().info('  Pitch安全: {}deg降推 -> {}deg归零'.format(
             PITCH_SAFE, PITCH_KILL))
         self.get_logger().info('  Depth FF: GAIN={} bias={:.4f} w_d={:.4f} w_p={:.4f} w_r={:.4f}'.format(
@@ -658,6 +751,21 @@ class MotorController(Node):
                 self.ins_roll = float(data.get('roll', 0.0))
                 self.ins_att_valid = True
                 self.last_att_time = now
+
+            # v8.1: INS 加速度 + 角速度
+            if 'ax' in data:
+                self.ins_ax = float(data['ax'])
+                self.ins_ay = float(data['ay'])
+                self.ins_az = float(data['az'])
+            if 'wx' in data:
+                self.ins_wx = float(data['wx'])
+                self.ins_wy = float(data['wy'])
+                self.ins_wz = float(data['wz'])
+            # v8.3: INS 速度 (ve/vn/vd)
+            if 've' in data:
+                self.ins_ve = float(data['ve'])
+                self.ins_vn = float(data['vn'])
+                self.ins_vd = float(data['vd'])
             
             # 深度
             if 'depth' in data:
@@ -804,7 +912,12 @@ class MotorController(Node):
         self.pitch_pid_out = _clamp(p_p + self.pitch_err_i, -1.0, 1.0)
 
     def _compute_yaw_pid(self):
-        """Yaw PID: 输出 mz in [-1,+1] (+ = 右转)"""
+        """Yaw PD: 输出 mz in [-1,+1] (+ = 右转)
+        
+        v8.4: 改为可调PD, 默认 KI=0. 
+        mz = KP*err + KD*(err-last_err)/dt
+        当 KI>0 时启用积分项 (与原PID一致).
+        """
         now = time.time()
         valid = (self.ins_att_valid and
                  (now - self.last_att_time) < YAW_ATT_TIMEOUT)
@@ -813,24 +926,39 @@ class MotorController(Node):
             return
 
         yaw_err = _angle_diff(self.yaw_target, self.ins_yaw)
-        dt = 0.1
+        dt = max(0.01, now - self.last_yaw_pid_time)
+        self.last_yaw_pid_time = now
 
+        # ── Proportional ──
         if abs(yaw_err) < YAW_DEADBAND:
             p_out = 0.0
         else:
             p_out = YAW_KP * yaw_err
 
-        if abs(yaw_err) > YAW_I_GATE:
-            pass
-        elif (yaw_err * self.yaw_err_i) < -0.01:
-            self.yaw_err_i = 0.0
-        elif abs(yaw_err) < YAW_DEADBAND:
-            self.yaw_err_i *= YAW_I_DECAY
+        # ── Derivative (角速度阻尼, 防震荡) ──
+        if self._last_yaw_err is not None:
+            err_dot = (yaw_err - self._last_yaw_err) / dt
+            d_out = YAW_KD * err_dot
         else:
-            self.yaw_err_i = _clamp(
-                self.yaw_err_i + YAW_KI * yaw_err * dt, -YAW_I_MAX, YAW_I_MAX)
+            d_out = 0.0
+        self._last_yaw_err = yaw_err
 
-        self.yaw_pid_out = _clamp(p_out + self.yaw_err_i, -1.0, 1.0)
+        # ── Integral (KI>0 时启用, 对抗恒定偏转) ──
+        i_out = 0.0
+        if YAW_KI > 0:
+            if abs(yaw_err) > YAW_I_GATE:
+                pass
+            elif (yaw_err * self.yaw_err_i) < -0.01:
+                self.yaw_err_i = 0.0
+            elif abs(yaw_err) < YAW_DEADBAND:
+                self.yaw_err_i *= YAW_I_DECAY
+            else:
+                self.yaw_err_i = _clamp(
+                    self.yaw_err_i + YAW_KI * yaw_err * dt,
+                    -YAW_I_MAX, YAW_I_MAX)
+            i_out = self.yaw_err_i
+
+        self.yaw_pid_out = _clamp(p_out + d_out + i_out, -1.0, 1.0)
 
     # ═══════════════════════════════════════════════════
     # 心跳 (10Hz)
@@ -898,7 +1026,8 @@ class MotorController(Node):
 
         # ── 构建 6-DOF 力/力矩向量 tau ──
         # Fx: 手动前进/后退 (深度保持时仍可平移)
-        fx = self.last_move
+        # v8.4: 翻转电机方向, 使 axis[3]=+1→电机后退(与监控显示一致)
+        fx = -self.last_move
 
         # Fy: 侧移 (当前无外部需求)
         fy = 0.0
@@ -980,8 +1109,8 @@ class MotorController(Node):
             if abs(depth_error) > DEPTH_FIXED_THRESHOLD:
                 # ── 阶段1: 固定推力 ──
                 if depth_error > 0:
-                    fz_tail = DIVE_TAIL_NORM   # +0.178 → 1180 RPM
-                    fz_vert = DIVE_VERT_NORM   # +0.678 → 1405 RPM
+                    fz_tail = DIVE_TAIL_NORM   # +0.334 → 1250 RPM (v8.5)
+                    fz_vert = DIVE_VERT_NORM   # +0.845 → 1480 RPM (v8.5)
                 else:
                     fz_tail = -SURF_TAIL_NORM  # -0.178 → -1180 RPM
                     fz_vert = -SURF_VERT_NORM  # -0.667 → -1400 RPM
@@ -992,8 +1121,8 @@ class MotorController(Node):
                 fz_vert = fz * FZ_GAIN_VERT
                 # 下潜方向保底: PID输出小时仍需克服浮力
                 if fz > 0.01:
-                    fz_tail = max(fz_tail, TAIL_DIVE_MIN)
-                    fz_vert = max(fz_vert, VERT_DIVE_MIN)
+                    fz_tail = max(fz_tail, TAIL_DIVE_MIN)  # v8.5: 保底1200RPM
+                    fz_vert = max(fz_vert, VERT_DIVE_MIN)  # v8.5: 保底1350RPM
         else:
             # 手动模式或无深度数据: 沿用原始 fz
             fz_tail = fz * FZ_GAIN_TAIL
@@ -1067,7 +1196,7 @@ class MotorController(Node):
                 mode_tag = 'MANUAL'
                 err = 0.0
             self.get_logger().info(
-                'v8.0 {}{} | 深={}/tar={:.2f} err={:+.3f}m pit={:.1f}° rol={:.1f}° yaw={:.1f}° | '
+                'v8.5 {}{} | 深={}/tar={:.2f} err={:+.3f}m pit={:.1f}° rol={:.1f}° yaw={:.1f}° | '
                 'fz={:+.3f} mx={:+.3f} my={:+.3f} mz={:+.3f} | '
                 'T={:+d} {:+d} {:+d} {:+d} V={:+d} {:+d} Y={:+d}{}{}'.format(
                     mode_tag, yh_tag, d_str, self.target_depth, err,
@@ -1123,7 +1252,7 @@ class MotorController(Node):
         alive = (self.sensor_proc.poll() is None
                  if hasattr(self, 'sensor_proc') and self.sensor_proc else False)
         self.get_logger().info(
-            'DIAG v8.0: depth={}m target={}m | yaw={:.1f}deg pitch={:.1f}deg roll={:.1f}deg | '
+            'DIAG v8.5: depth={}m target={}m | yaw={:.1f}deg pitch={:.1f}deg roll={:.1f}deg | '
             'att_age={:.1f}s dep_age={:.1f}s | '
             'PID: fz={:+.3f} mx={:+.3f} my={:+.3f} mz_id7={:+.3f} | '
             'yaw_hold={} yaw_target={:.1f} yaw_captured={} proc_alive={}'.format(
@@ -1164,6 +1293,15 @@ class MotorController(Node):
             'ins_pitch': round(self.ins_pitch, 1),
             'ins_roll': round(self.ins_roll, 1),
             'ins_att_valid': self.ins_att_valid,
+            'ins_ax': round(self.ins_ax, 3),
+            'ins_ay': round(self.ins_ay, 3),
+            'ins_az': round(self.ins_az, 3),
+            'ins_wx': round(self.ins_wx, 3),
+            'ins_wy': round(self.ins_wy, 3),
+            'ins_wz': round(self.ins_wz, 3),
+            'ins_ve': round(self.ins_ve, 3),
+            'ins_vn': round(self.ins_vn, 3),
+            'ins_vd': round(self.ins_vd, 3),
             'motors': self.last_motors,
             'initialized': self.initialized,
             'ts': now
@@ -1216,9 +1354,40 @@ from std_msgs.msg import Float32
 rclpy.init()
 n = rclpy.create_node("sensor_bridge")
 
-state = {"yaw": 0.0, "pitch": 0.0, "roll": 0.0, "depth": 0.0}
+state = {"yaw": 0.0, "pitch": 0.0, "roll": 0.0, "depth": 0.0,
+         "ax": 0.0, "ay": 0.0, "az": 0.0,
+         "wx": 0.0, "wy": 0.0, "wz": 0.0,
+         "ve": 0.0, "vn": 0.0, "vd": 0.0}
 ins_count = 0
 dep_count = 0
+acc_valid = False
+gyro_valid = False
+vel_valid = False
+
+def _write_state():
+    out = {}
+    if ins_count > 0:
+        out["yaw"] = state["yaw"]
+        out["pitch"] = state["pitch"]
+        out["roll"] = state["roll"]
+    if dep_count > 0:
+        out["depth"] = state["depth"]
+    if acc_valid:
+        out["ax"] = state["ax"]
+        out["ay"] = state["ay"]
+        out["az"] = state["az"]
+    if gyro_valid:
+        out["wx"] = state["wx"]
+        out["wy"] = state["wy"]
+        out["wz"] = state["wz"]
+    if vel_valid:
+        out["ve"] = state["ve"]
+        out["vn"] = state["vn"]
+        out["vd"] = state["vd"]
+    tmp_file = "/tmp/sensor_data.tmp"
+    with open(tmp_file, 'w') as f:
+        f.write(json.dumps(out) + '\n')
+    os.rename(tmp_file, "/tmp/sensor_data.json")
 
 def att_cb(msg):
     global ins_count
@@ -1228,34 +1397,41 @@ def att_cb(msg):
     ins_count += 1
     # INS 100Hz → 每10帧输出一次减少管道压力
     if ins_count % 10 == 0:
-        out = {"yaw": state["yaw"], "pitch": state["pitch"], "roll": state["roll"]}
-        # 如果有深度数据也带上
-        if dep_count > 0:
-            out["depth"] = state["depth"]
-        # 只写入文件 (不再print到stdout)
-        tmp_file = "/tmp/sensor_data.tmp"
-        with open(tmp_file, 'w') as f:
-            f.write(json.dumps(out) + '\n')
-        os.rename(tmp_file, "/tmp/sensor_data.json")
+        _write_state()
 
 def dep_cb(msg):
     global dep_count
     state["depth"] = float(msg.data)
     dep_count += 1
     # 深度 ~2Hz → 每次收到都输出
-    out = {"depth": state["depth"]}
-    if ins_count > 0:
-        out["yaw"] = state["yaw"]
-        out["pitch"] = state["pitch"]
-        out["roll"] = state["roll"]
-    # 只写入文件 (不再print到stdout)
-    tmp_file = "/tmp/sensor_data.tmp"
-    with open(tmp_file, 'w') as f:
-        f.write(json.dumps(out) + '\n')
-    os.rename(tmp_file, "/tmp/sensor_data.json")
+    _write_state()
+
+def acc_cb(msg):
+    global acc_valid
+    state["ax"] = float(msg.x)
+    state["ay"] = float(msg.y)
+    state["az"] = float(msg.z)
+    acc_valid = True
+
+def gyro_cb(msg):
+    global gyro_valid
+    state["wx"] = float(msg.x)
+    state["wy"] = float(msg.y)
+    state["wz"] = float(msg.z)
+    gyro_valid = True
+
+def vel_cb(msg):
+    global vel_valid
+    state["ve"] = float(msg.x)
+    state["vn"] = float(msg.y)
+    state["vd"] = float(msg.z)
+    vel_valid = True
 
 n.create_subscription(Vector3, "/ins/attitude", att_cb, 10)
 n.create_subscription(Float32, "/rov/depth", dep_cb, 10)
+n.create_subscription(Vector3, "/ins/acceleration", acc_cb, 10)
+n.create_subscription(Vector3, "/ins/angular_rate", gyro_cb, 10)
+n.create_subscription(Vector3, "/ins/velocity", vel_cb, 10)
 sys.stderr.write("SENSOR_BRIDGE_READY\n"); sys.stderr.flush()
 
 # 主循环 - 添加详细异常处理
@@ -1299,6 +1475,7 @@ except Exception as e:
     executor = MultiThreadedExecutor()
     executor.add_node(node)
 
+    sensor_restart_count = 0
     try:
         loop_count = 0
         while rclpy.ok():
@@ -1316,6 +1493,40 @@ except Exception as e:
             except Exception as e:
                 node.get_logger().error('SPIN_ONCE EXCEPTION: {}'.format(e))
             
+            # v8.2: 超时检查 (每10个循环≈1秒检查一次)
+            if loop_count % 10 == 0:
+                try:
+                    node.timeout_check()
+                except Exception as e:
+                    node.get_logger().error('TIMEOUT_CHECK EXCEPTION: {}'.format(e))
+            
+            # v8.2: sensor_bridge 健康监控 (每50个循环≈5秒检查一次)
+            if loop_count % 50 == 0:
+                if sensor_proc.poll() is not None:
+                    sensor_restart_count += 1
+                    node.get_logger().error(
+                        'SENSOR_BRIDGE 已退出(码={}), 第{}次重启...'.format(
+                            sensor_proc.returncode, sensor_restart_count))
+                    # 重启 sensor_bridge
+                    sensor_proc = _sp.Popen(
+                        ['python3', '-u', '-c', sensor_bridge_code],
+                        stdout=_sp.DEVNULL,
+                        stderr=open('/tmp/sensor_bridge_stderr.log', 'w'),
+                        text=True, bufsize=1)
+                    node.sensor_proc = sensor_proc
+                    time.sleep(0.5)
+                    if sensor_proc.poll() is None:
+                        node.get_logger().info(
+                            'SENSOR_BRIDGE 重启成功 (PID={})'.format(sensor_proc.pid))
+                    else:
+                        node.get_logger().error('SENSOR_BRIDGE 重启失败!')
+
+                # v8.2: CAN 健康检查 — socket 为 None 时主动恢复
+                if _can_sock is None and not _can_recovering:
+                    node.get_logger().warn('CAN socket 为 None, 主动触发恢复...')
+                    t = threading.Thread(target=can_recover, daemon=True)
+                    t.start()
+            
             time.sleep(0.09)  # 10Hz = 100ms = 0.1s
     except KeyboardInterrupt:
         pass
@@ -1325,6 +1536,16 @@ except Exception as e:
             can_close()
         except Exception:
             pass
+        # v8.2: 清理 sensor_bridge 子进程, 防止孤儿进程
+        try:
+            if sensor_proc.poll() is None:
+                sensor_proc.terminate()
+                sensor_proc.wait(timeout=2)
+        except Exception:
+            try:
+                sensor_proc.kill()
+            except Exception:
+                pass
         os._exit(0)
 
 

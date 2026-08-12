@@ -8,7 +8,7 @@ SF 超声波测深仪（高度计）ROS2 驱动
   /rov/altitude_nearest  std_msgs/Float32  最近目标距离（米）
   /rov/altitude_raw      std_msgs/Float32  最强目标原始值（cm）
 """
-import os, sys, time, struct, select, termios, fcntl
+import os, sys, time, struct, select, termios, fcntl, signal
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32
@@ -55,17 +55,30 @@ class NativeSerial:
         termios.tcdrain(self.fd)
 
     def read(self, length):
-        """循环读取直到收满 length 字节或超时"""
+        """VMIN=1 阻塞读取 + signal.alarm 总超时保护。
+        RK3588 ttyS3 (dw-apb-uart) 的 select() 和 VMIN=0 均不工作，
+        只有 VMIN=1 (阻塞直到至少1字节) 有效。用 SIGALRM 防止永久阻塞。"""
+        attr = termios.tcgetattr(self.fd)
+        attr[6][termios.VMIN] = 1
+        attr[6][termios.VTIME] = max(1, int(self.timeout * 10))
+        termios.tcsetattr(self.fd, termios.TCSANOW, attr)
+
         buf = b''
-        deadline = time.time() + self.timeout
-        while len(buf) < length and time.time() < deadline:
-            r, _, _ = select.select([self.fd], [], [], max(0.02, self.timeout / 10))
-            if r:
+        def _alarm_handler(signum, frame):
+            raise TimeoutError('serial read timeout')
+        old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
+        signal.setitimer(signal.ITIMER_REAL, self.timeout)
+        try:
+            while len(buf) < length:
                 chunk = os.read(self.fd, length - len(buf))
-                if chunk:
-                    buf += chunk
-                else:
-                    break  # EOF/error
+                if not chunk:
+                    break
+                buf += chunk
+        except (TimeoutError, OSError):
+            pass
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old_handler)
         return buf
 
     def reset_input_buffer(self):
@@ -106,11 +119,10 @@ class AltimeterDriver(Node):
         self.pub_nearest = self.create_publisher(Float32, '/rov/altitude_nearest', 10)
         self.pub_raw = self.create_publisher(Float32, '/rov/altitude_raw', 10)
         self.get_logger().info(f'打开 {SERIAL_PORT} @ {BAUDRATE}')
-        self.ser = NativeSerial(SERIAL_PORT, BAUDRATE, timeout=0.5)
+        self.ser = NativeSerial(SERIAL_PORT, BAUDRATE, timeout=1.5)
         # 清空上电残留
         time.sleep(0.3)
-        while len(self.ser.read(64)) > 0:
-            pass
+        self.ser.reset_input_buffer()
         self.cmd = build_command(DEVICE_ID)
         self.timer = self.create_timer(1.0, self.poll)
         self.fail = 0
@@ -121,7 +133,7 @@ class AltimeterDriver(Node):
             self.ser.reset_input_buffer()
             self.ser.write(self.cmd)
             self.ser.flush()
-            time.sleep(0.1)
+            time.sleep(0.3)
             resp = self.ser.read(READ_BUF)
             if len(resp) < FRAME_LEN:
                 self.fail += 1

@@ -200,7 +200,7 @@ class INSAutoDriver(Node):
         elif self._step == 4 and elapsed >= 3.5:
             self.get_logger().info(
                 '[步骤 4/4] 发送 INS 启动命令 (0x47) — 仅一次！')
-            cmd = build_start_cmd(position_valid=True, attitude_valid=True)
+            cmd = build_start_cmd(position_valid=True, attitude_valid=False)
             self._send_cmd(cmd)
             self.get_logger().info('')
             self.get_logger().info('  ╔════════════════════════════════════════╗')
@@ -296,24 +296,65 @@ class INSAutoDriver(Node):
         try:
             # 字节 2 bit1..0: 0=监控 1=粗对准 2=精对准 3=INS导航
             alignment = data[2] & 0x03
-            # INS 安装方向修正: roll↔pitch 交换, roll 正负取反
-            # 原始 data[33:37] 实际是物理 roll(正负对), data[37:41] 实际是物理 pitch(正负反)
-            raw_pitch = struct.unpack('<f', data[33:37])[0]
-            raw_roll  = struct.unpack('<f', data[37:41])[0]
-            roll  = raw_pitch           # 物理 roll = 原始 pitch (正负对)
-            pitch = -raw_roll           # 物理 pitch = -原始 roll (原始存的是物理 pitch 且正负反了)
-            yaw   = struct.unpack('<f', data[41:45])[0]
-            ve = struct.unpack('<f', data[45:49])[0]
-            vn = struct.unpack('<f', data[49:53])[0]
-            vd = struct.unpack('<f', data[53:57])[0]
-            # 加速度 (字节 21-32, m/s²)
-            ax = struct.unpack('<f', data[21:25])[0]
-            ay = struct.unpack('<f', data[25:29])[0]
-            az = struct.unpack('<f', data[29:33])[0]
-            # 角速率 (字节 9-20, deg/s)
-            wx = struct.unpack('<f', data[9:13])[0]
-            wy = struct.unpack('<f', data[13:17])[0]
-            wz = struct.unpack('<f', data[17:21])[0]
+
+            # ═══ INS→DVL 坐标系转换 (v6) ═════════════════════════════
+            # INS 标称轴: X左 Y前 Z下 (右手系)
+            # DVL 安装轴: X前 Y右 Z下 (右手系)
+            # 物理安装: INS 相对 DVL 绕Z轴旋转180° (INS朝后安装)
+            #   → INS X(左)+180° = 右 = DVL Y
+            #   → INS Y(前)+180° = 后 = -DVL X
+            #   → INS Z(下)      = 下 = DVL Z (不变)
+            #
+            # 姿态转换 (180°绕Z旋转 → pitch/roll均取反):
+            #   pitch_dvl = -pitch_ins   ✓ (已验证: v4-v5)
+            #   roll_dvl  = -roll_ins    ✓ (已验证: v4-v5)
+            #   yaw_dvl   = (180 - yaw_ins) % 360
+            #     INS yaw约定: 北偏东为负 (逆时针为正)
+            #     DVL heading约定: 北偏东为正 (顺时针为正, 标准航向)
+            #     符号翻转(约定转换) + 180°偏移(物理安装)
+            #     验证: ROV朝北→INS Y朝南→yaw_ins=180→heading=0  ✓
+            #           ROV朝东→INS Y朝西→yaw_ins=+90→heading=90  ✓
+            #           ROV朝南→INS Y朝北→yaw_ins=0→heading=180   ✓
+            #           ROV朝西→INS Y朝东→yaw_ins=-90→heading=270 ✓
+            #
+            # 载体坐标系加速度/角速率/速度转换 (180°安装):
+            #   DVL_X = -INS_Y  →  ax_dvl = -ay_ins,  wx_dvl = -wy_ins,  ve_dvl = -vn_ins
+            #   DVL_Y =  INS_X  →  ay_dvl =  ax_ins,  wy_dvl =  wx_ins,  vn_dvl =  ve_ins
+            #   DVL_Z =  INS_Z  →  az_dvl =  az_ins,  wz_dvl =  wz_ins,  vd_dvl =  vd_ins
+            # 速度为载体坐标系 (与加速度同框架), 需按安装方向转换
+            # ════════════════════════════════════════════════════════
+
+            raw_pitch = struct.unpack('<f', data[33:37])[0]   # INS 俯仰角
+            raw_roll  = struct.unpack('<f', data[37:41])[0]   # INS 横滚角
+            raw_yaw   = struct.unpack('<f', data[41:45])[0]   # INS 方位角(北偏东为负)
+
+            roll  = -raw_roll                       # 180°安装 → roll取反
+            pitch = -raw_pitch                      # 180°安装 → pitch取反
+            yaw   = 180.0 - raw_yaw       # 符号翻转 + 180°物理偏移
+
+            # 速度 (载体坐标系, 需转换 — 与加速度同框架)
+            raw_ve = struct.unpack('<f', data[45:49])[0]  # INS X方向 (左)
+            raw_vn = struct.unpack('<f', data[49:53])[0]  # INS Y方向 (前)
+            raw_vd = struct.unpack('<f', data[53:57])[0]  # INS Z方向 (下)
+            ve = -raw_vn             # DVL X(前) = -INS Y(前, 180°翻转)
+            vn =  raw_ve             # DVL Y(右) =  INS X(左, 180°翻转)
+            vd =  raw_vd             # DVL Z(下) =  INS Z(下)
+
+            # 加速度 (字节 21-32, m/s²) — 载体坐标系, 需转换
+            raw_ax = struct.unpack('<f', data[21:25])[0]
+            raw_ay = struct.unpack('<f', data[25:29])[0]
+            raw_az = struct.unpack('<f', data[29:33])[0]
+            ax = -raw_ay             # DVL X = -INS Y (180°安装取反)
+            ay =  raw_ax             # DVL Y =  INS X
+            az =  raw_az             # DVL Z =  INS Z
+
+            # 角速率 (字节 9-20, deg/s) — 载体坐标系, 需转换
+            raw_wx = struct.unpack('<f', data[9:13])[0]
+            raw_wy = struct.unpack('<f', data[13:17])[0]
+            raw_wz = struct.unpack('<f', data[17:21])[0]
+            wx = -raw_wy             # DVL X = -INS Y (180°安装取反)
+            wy =  raw_wx             # DVL Y =  INS X
+            wz =  raw_wz             # DVL Z =  INS Z
             # 水平面加速度 + 天向加速度 (字节 129-136, m/s²)
             acc_h = struct.unpack('<f', data[129:133])[0]
             acc_v = struct.unpack('<f', data[133:137])[0]

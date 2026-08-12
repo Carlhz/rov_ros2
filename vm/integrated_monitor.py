@@ -107,6 +107,11 @@ class ROVMonitor(Node):
         self.motor_yaw_hold_target = 0.0          # 定航向目标 (度)
         self.motor_yaw_err = 0.0                  # 航向误差 (度)
 
+        # ── 水下灯状态 ──
+        self.light_state = 0
+        self.light_age = 999.0
+        self.light_names = {0: '关', 1: '半亮', 2: '全亮'}
+
         # ── DVL 数据 ──
         self.dvl = {
             'bottom_vel_east': 0.0, 'bottom_vel_north': 0.0, 'bottom_vel_up': 0.0,
@@ -114,6 +119,8 @@ class ROVMonitor(Node):
             'temperature': None, 'bt_status': 'N', 'bt_percent_good': [0,0,0,0],
             'bt_corr': [0,0,0,0], 'ensembles': 0, 'parse_errors': 0,
             'coord_system': 'UNKNOWN', 'age': 999.0, 'salinity': 0.0,
+            'device': 'H1000', 'connected': False, 'timestamp': '',
+            'speed_of_sound': 1500,
         }
 
         # ── 计数 ──
@@ -144,6 +151,9 @@ class ROVMonitor(Node):
         self.sub_dvl_vel = self.create_subscription(Vector3, '/rov/dvl/bottom_vel', self._cb_dvl_vel, 10)
         self.sub_dvl_alt = self.create_subscription(Float32, '/rov/dvl/altitude', self._cb_dvl_alt, 10)
         self.sub_dvl_sts = self.create_subscription(String, '/rov/dvl/status', self._cb_dvl_status, 10)
+
+        # ── 订阅水下灯状态 ──
+        self.sub_light = self.create_subscription(Int8, '/rov/light_state', self._cb_light, 10)
 
         # ── 刷新定时器 (4Hz) ──
         self._start_time = time.time()
@@ -233,12 +243,19 @@ class ROVMonitor(Node):
         self.dvl['altitude'] = msg.data
         self.dvl['age'] = 0.0
 
+    def _cb_light(self, msg):
+        code = int(msg.data)
+        if code in self.light_names:
+            self.light_state = code
+            self.light_age = 0.0
+
     def _cb_dvl_status(self, msg):
         try:
             s = json.loads(msg.data)
             for k in ['depth', 'heading', 'pitch', 'roll', 'temperature',
                        'bt_status', 'bt_percent_good', 'bt_corr', 'ensembles',
-                       'parse_errors', 'coord_system', 'salinity']:
+                       'parse_errors', 'coord_system', 'salinity',
+                       'device', 'connected', 'timestamp', 'speed_of_sound']:
                 if k in s:
                     self.dvl[k] = s[k]
             if 'attitude' in s:
@@ -313,6 +330,7 @@ class ROVMonitor(Node):
         self.altitude['age'] += dt
         self.alti_near['age'] += dt
         self.motor_age += dt
+        self.light_age += dt
         self.dvl['age'] += dt
 
         # 更新 FPS
@@ -439,6 +457,15 @@ class ROVMonitor(Node):
             f'  {a_flag} {C_INFO}高度(最强){C_RESET}={a_f} m  |  '
             f'{C_INFO}最近目标{C_RESET}={n_f} m', BW))
 
+        # 水下灯状态
+        light_ok = self.light_age < MAX_AGE
+        light_color = C_OK if light_ok else C_DIM
+        light_name = self.light_names.get(self.light_state, '未知')
+        light_flag = f'{C_OK} ✓ {C_RESET}' if light_ok else f'{C_DIM} - {C_RESET}'
+        lines.append(self._box_line(
+            f'  {light_flag} {C_INFO}水下灯{C_RESET}={light_color}{light_name}{C_RESET}  '
+            f'(RT循环切换: 关→半亮→全亮→关)', BW))
+
         lines.append(self._box_bot(BW))
 
         # ═══ 电机转速区块 ═══
@@ -458,7 +485,7 @@ class ROVMonitor(Node):
 
             dive_status = f'{C_BG_GREEN} ★定深档 {C_RESET}' if self.motor_dive else f'{C_DIM}普通档{C_RESET}'
 
-            move_n = -self.motor_move  # 显示方向修正: joy_controller用-RY发送,正=前进
+            move_n = -self.motor_move  # v5.1: joy_controller去取反后, motor_move负=前进, 此处再取反使正=前进显示
             if move_n > 0.01:
                 mv_status = f'{C_OK}→前进{C_RESET}'
             elif move_n < -0.01:
@@ -468,7 +495,7 @@ class ROVMonitor(Node):
 
             lines.append(self._box_line(
                 f'  状态: {up_status}  {mv_status}  {dive_status}  '
-                f'move={C_VALUE}{self.motor_move:+.3f}{C_RESET}  '
+                f'move={C_VALUE}{move_n:+.3f}{C_RESET}  '
                 f'up={C_VALUE}{self.motor_up:+.3f}{C_RESET}  '
                 f'yaw={C_VALUE}{self.motor_yaw:+.3f}{C_RESET}', BW))
 
@@ -526,7 +553,7 @@ class ROVMonitor(Node):
         lines.append(self._box_bot(BW))
 
         # ═══ DVL 区块 ═══
-        lines.append(self._box_top('DVL 多普勒计程仪 (PathFinder)', BW))
+        lines.append(self._box_top('DVL 多普勒计程仪 (H1000)', BW))
 
         dvl_age = self.dvl['age']
         dvl_stale = dvl_age > MAX_AGE
@@ -568,8 +595,13 @@ class ROVMonitor(Node):
                 f'{C_INFO}Roll{C_RESET}={dvl_roll}°', BW))
 
             pg = self.dvl['bt_percent_good']
-            pg_str = '  '.join(f'B{i}:{pg[i]:3d}%' for i in range(4))
-            lines.append(self._box_line(f'  %Good:  {pg_str}', BW))
+            device = self.dvl.get('device', 'H1000')
+            is_connected = self.dvl.get('connected', False)
+            conn_str = f'{C_OK}已连接{C_RESET}' if is_connected else f'{C_ERROR}断开{C_RESET}'
+            sos = self.dvl.get('speed_of_sound', 1500)
+            lines.append(self._box_line(
+                f'  设备:   {C_INFO}{device}{C_RESET}  |  {conn_str}  |  '
+                f'{C_INFO}声速{C_RESET}={sos} m/s', BW))
 
             coord = self.dvl.get('coord_system', '?')
             ens   = self.dvl.get('ensembles', 0)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ROV 手柄控制器 v5.0 (VM 端) — 简化为纯指令转发
+ROV 手柄控制器 v5.2 (VM 端) — 简化为纯指令转发
 深度PID + 姿态PID 已全部迁移至 motor_controller (RK3588 本地)
 
 v5.0 重大简化:
@@ -30,7 +30,7 @@ os.environ['ROS_DOMAIN_ID'] = '42'
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
-from std_msgs.msg import String
+from std_msgs.msg import String, Int8
 import json
 import time
 import sys
@@ -57,8 +57,8 @@ BTN_X     = 0
 BTN_Y     = 3
 BTN_LB    = 4
 BTN_RB    = 5
-BTN_BACK  = 6
-BTN_START = 7
+BTN_LT    = 6   # 图里 [6] 对应 LT（暂未使用）
+BTN_RT    = 7   # 图里 [7] 对应 RT，切换水下灯
 
 # ── 速度档位 ───────────────────────────────────────────────
 SPEED_GEARS  = [1200, 1400, 1600]
@@ -168,6 +168,7 @@ class JoyController(Node):
 
         self.cmd_pub   = self.create_publisher(Twist,  '/rov/cmd_vel',   10)
         self.state_pub = self.create_publisher(String, '/rov/joy_state', 10)
+        self.light_pub = self.create_publisher(String, '/rov/light_cmd', 10)
 
         # ── v5.0: 订阅 motor_controller 状态 (用于显示电机转速和深度) ──
         self.sub_motor = self.create_subscription(
@@ -207,11 +208,28 @@ class JoyController(Node):
         self.yaw_hold_on     = False
         self.yaw_hold_target = 0.0  # 目标航向 (度)
 
+        # ── v5.2: 水下灯状态 ──
+        self.sub_light = self.create_subscription(
+            Int8, '/rov/light_state', self._cb_light, 10)
+        self.light_state = 0       # 0=关, 1=半亮, 2=全亮
+        self.light_age   = 999.0   # 状态回显超时
+        self.light_names = {0: '关', 1: '半亮', 2: '全亮'}
+
         # ── v5.0: 姿态+电机状态 (从 motor_state 获取, 仅显示) ──
         self.ins_yaw      = 0.0
         self.ins_pitch    = 0.0
         self.ins_roll     = 0.0
         self.ins_att_valid = False
+        # v8.1: INS 加速度 + 角速度 (CSV 记录用)
+        self.ins_ax = 0.0
+        self.ins_ay = 0.0
+        self.ins_az = 0.0
+        self.ins_wx = 0.0
+        self.ins_wy = 0.0
+        self.ins_wz = 0.0
+        self.ins_ve = 0.0
+        self.ins_vn = 0.0
+        self.ins_vd = 0.0
         self.depth_pid_out = 0.0
         self.roll_pid_out  = 0.0
         self.pitch_pid_out = 0.0
@@ -249,12 +267,12 @@ class JoyController(Node):
         self.create_timer(0.05, self.heartbeat_timer)
 
         self.get_logger().info('=' * 60)
-        self.get_logger().info('  ROV 手柄控制器 v5.0 — 纯指令转发 (PID在RK3588本地)')
+        self.get_logger().info('  ROV 手柄控制器 v5.2 — 纯指令转发 (PID在RK3588本地)')
         self.get_logger().info('  定深: linear.z=target_depth(米), linear.y=flag')
-        self.get_logger().info('  档位: 4档=定深, 1~3档=手动')
+        self.get_logger().info('  档位: 4档=定深, 1~3档=手动  RT:切换水下灯')
         self.get_logger().info('  设备: {}'.format(JS_DEVICE))
         self.get_logger().info('=' * 60)
-        self._publish_state('ready', 'v5.0 纯指令转发就绪')
+        self._publish_state('ready', 'v5.2 纯指令转发就绪')
 
     # ═══════════════════════════════════════════════════
     # 回调: 从 motor_state 获取所有状态
@@ -291,6 +309,17 @@ class JoyController(Node):
                 self.ins_roll = float(s.get('ins_roll', 0))
                 self.ins_att_valid = True
 
+            # v8.1: INS 加速度 + 角速度
+            self.ins_ax = float(s.get('ins_ax', 0))
+            self.ins_ay = float(s.get('ins_ay', 0))
+            self.ins_az = float(s.get('ins_az', 0))
+            self.ins_wx = float(s.get('ins_wx', 0))
+            self.ins_wy = float(s.get('ins_wy', 0))
+            self.ins_wz = float(s.get('ins_wz', 0))
+            self.ins_ve = float(s.get('ins_ve', 0))
+            self.ins_vn = float(s.get('ins_vn', 0))
+            self.ins_vd = float(s.get('ins_vd', 0))
+
             # PID 输出
             self.depth_pid_out = float(s.get('depth_pid_out', 0))
             self.roll_pid_out = float(s.get('roll_pid_out', 0))
@@ -302,6 +331,13 @@ class JoyController(Node):
 
         except Exception:
             pass
+
+    def _cb_light(self, msg: Int8):
+        """接收 ttyS5_modbus_hub 回显的灯状态"""
+        code = int(msg.data)
+        if code in self.light_names:
+            self.light_state = code
+            self.light_age = 0.0
 
     # ═══════════════════════════════════════════════════
     # 深度悬停开关
@@ -337,6 +373,16 @@ class JoyController(Node):
             self._set_status('定航向已关闭', 3.0)
             self._publish_state('yaw_hold', 'off')
 
+    def _cycle_light(self):
+        """RT 按下时循环切换水下灯: 关→半亮→全亮→关"""
+        cycle = {0: 'half', 1: 'full', 2: 'off'}
+        next_state = cycle.get(self.light_state, 'half')
+        self.light_state = {0: 1, 1: 2, 2: 0}.get(self.light_state, 1)
+        m = String()
+        m.data = next_state
+        self.light_pub.publish(m)
+        self._set_status('水下灯 -> {}'.format(self.light_names[self.light_state]), 2.0)
+
     def _adjust_yaw_target(self, delta):
         """调整目标航向 (±5度)"""
         self.yaw_hold_target += delta
@@ -368,6 +414,9 @@ class JoyController(Node):
             'elapsed_sec', 'target_depth_m', 'actual_depth_m',
             'depth_pid', 'roll_pid', 'pitch_pid', 'yaw_pid',
             'ins_roll_deg', 'ins_pitch_deg', 'ins_yaw_deg',
+            'ins_ax', 'ins_ay', 'ins_az',
+            'ins_wx', 'ins_wy', 'ins_wz',
+            'ins_ve', 'ins_vn', 'ins_vd',
             'id0_rpm', 'id1_rpm', 'id2_rpm', 'id3_rpm',
             'id5_rpm', 'id6_rpm', 'id7_rpm'
         ])
@@ -383,7 +432,8 @@ class JoyController(Node):
         self._set_status('CSV已保存: {}'.format(os.path.basename(self.csv_path)), 5.0)
 
     def _write_csv_row(self, elapsed, target_d, actual_d,
-                       dp, rp, pp, yp, v_roll, v_pitch, v_yaw, rpms):
+                       dp, rp, pp, yp, v_roll, v_pitch, v_yaw,
+                       ax, ay, az, wx, wy, wz, ve, vn, vd, rpms):
         if self.csv_file is None:
             return
         try:
@@ -393,7 +443,10 @@ class JoyController(Node):
                  '{:.4f}'.format(dp), '{:.4f}'.format(rp),
                  '{:.4f}'.format(pp), '{:.4f}'.format(yp),
                  '{:.2f}'.format(v_roll), '{:.2f}'.format(v_pitch),
-                 '{:.2f}'.format(v_yaw)]
+                 '{:.2f}'.format(v_yaw),
+                 '{:.4f}'.format(ax), '{:.4f}'.format(ay), '{:.4f}'.format(az),
+                 '{:.4f}'.format(wx), '{:.4f}'.format(wy), '{:.4f}'.format(wz),
+                 '{:.4f}'.format(ve), '{:.4f}'.format(vn), '{:.4f}'.format(vd)]
                 + [str(r) for r in rpms])
             self.csv_file.flush()
         except Exception:
@@ -411,6 +464,9 @@ class JoyController(Node):
             'elapsed_sec', 'target_yaw_deg', 'actual_yaw_deg', 'yaw_error_deg',
             'yaw_pid', 'roll_pid', 'pitch_pid', 'depth_pid',
             'ins_roll_deg', 'ins_pitch_deg', 'ins_yaw_deg',
+            'ins_ax', 'ins_ay', 'ins_az',
+            'ins_wx', 'ins_wy', 'ins_wz',
+            'ins_ve', 'ins_vn', 'ins_vd',
             'id0_rpm', 'id1_rpm', 'id2_rpm', 'id3_rpm',
             'id5_rpm', 'id6_rpm', 'id7_rpm'
         ])
@@ -426,7 +482,8 @@ class JoyController(Node):
         self._set_status('定航向CSV已保存: {}'.format(os.path.basename(self.yaw_csv_path)), 5.0)
 
     def _write_yaw_csv_row(self, elapsed, target_y, actual_y, yaw_err,
-                           yp, rp, pp, dp, v_roll, v_pitch, v_yaw, rpms):
+                           yp, rp, pp, dp, v_roll, v_pitch, v_yaw,
+                           ax, ay, az, wx, wy, wz, ve, vn, vd, rpms):
         if self.yaw_csv_file is None:
             return
         try:
@@ -437,7 +494,10 @@ class JoyController(Node):
                  '{:.4f}'.format(yp), '{:.4f}'.format(rp),
                  '{:.4f}'.format(pp), '{:.4f}'.format(dp),
                  '{:.2f}'.format(v_roll), '{:.2f}'.format(v_pitch),
-                 '{:.2f}'.format(v_yaw)]
+                 '{:.2f}'.format(v_yaw),
+                 '{:.4f}'.format(ax), '{:.4f}'.format(ay), '{:.4f}'.format(az),
+                 '{:.4f}'.format(wx), '{:.4f}'.format(wy), '{:.4f}'.format(wz),
+                 '{:.4f}'.format(ve), '{:.4f}'.format(vn), '{:.4f}'.format(vd)]
                 + [str(r) for r in rpms])
             self.yaw_csv_file.flush()
         except Exception:
@@ -549,6 +609,8 @@ class JoyController(Node):
         hint_line = 'A:急停 B:恢复 X:定航({}) LB/RB:{} Y:{}'.format(
             yh_status, lb_rb_hint,
             '开关悬停' if self.gear == GEAR_DIVE else '需升到4档')
+        light_line = '水下灯: [{}]  (RT切换)'.format(
+            self.light_names.get(self.light_state, '未知'))
 
         lines = [
             '+' + '-' * INNER + '+',
@@ -566,6 +628,7 @@ class JoyController(Node):
             '+' + '-' * INNER + '+',
             '| ' + _pad_to(btn_line, INNER - 2) + ' |',
             '| ' + _pad_to(hint_line, INNER - 2) + ' |',
+            '| ' + _pad_to(light_line, INNER - 2) + ' |',
         ]
 
         if self._status_msg and time.time() < self._status_until:
@@ -616,7 +679,7 @@ class JoyController(Node):
             self.lx, self.ly, self.rx, self.ry))
 
     def _run_axis_scanner(self):
-        btn_names = ['X', 'A', 'B', 'Y', 'LB', 'RB', 'Back', 'Start', 'Logo', 'L3', 'R3']
+        btn_names = ['X', 'A', 'B', 'Y', 'LB', 'RB', 'LT', 'RT', 'Logo', 'L3', 'R3']
         print('=== F710 按键/轴扫描 (Ctrl+C 退出) ===')
         print()
         try:
@@ -673,7 +736,7 @@ class JoyController(Node):
 
         # 摇杆
         raw_up   = axes.get(self.ly, 0.0)
-        raw_move = -axes.get(self.ry, 0.0)
+        raw_move = axes.get(self.ry, 0.0)   # v5.1: 去掉取反, 修正电机前进方向
         raw_yaw  = axes.get(self.rx, 0.0)
 
         move = self.apply_deadzone(raw_move)
@@ -745,6 +808,10 @@ class JoyController(Node):
         if self._debounce_btn(btn_arr, self._last_btns if hasattr(self, '_last_btns') else [0]*11, BTN_X):
             self._toggle_yaw_hold()
 
+        # RT键 (按钮7): 循环切换水下灯
+        if self._debounce_btn(btn_arr, self._last_btns if hasattr(self, '_last_btns') else [0]*11, BTN_RT):
+            self._cycle_light()
+
         self._last_btns = btn_arr
 
         # 急停
@@ -786,7 +853,11 @@ class JoyController(Node):
             self._write_csv_row(
                 elapsed, self.target_depth, self.current_depth,
                 self.depth_pid_out, self.roll_pid_out, self.pitch_pid_out, self.yaw_pid_out,
-                self.ins_roll, self.ins_pitch, self.ins_yaw, rpms)
+                self.ins_roll, self.ins_pitch, self.ins_yaw,
+                self.ins_ax, self.ins_ay, self.ins_az,
+                self.ins_wx, self.ins_wy, self.ins_wz,
+                self.ins_ve, self.ins_vn, self.ins_vd,
+                rpms)
 
         # 定航向 CSV 记录
         if self.yaw_hold_on and self.yaw_csv_file is not None:
@@ -803,14 +874,18 @@ class JoyController(Node):
             self._write_yaw_csv_row(
                 elapsed, self.yaw_hold_target, self.ins_yaw, yaw_err,
                 self.yaw_pid_out, self.roll_pid_out, self.pitch_pid_out, self.depth_pid_out,
-                self.ins_roll, self.ins_pitch, self.ins_yaw, rpms)
+                self.ins_roll, self.ins_pitch, self.ins_yaw,
+                self.ins_ax, self.ins_ay, self.ins_az,
+                self.ins_wx, self.ins_wy, self.ins_wz,
+                self.ins_ve, self.ins_vn, self.ins_vd,
+                rpms)
 
         # ═══════════════════════════════════════════════════
         # 显示
         # ═══════════════════════════════════════════════════
-        btn_names = ['X', 'A', 'B', 'Y', 'LB', 'RB', 'Back', 'Start']
+        btn_names = ['X', 'A', 'B', 'Y', 'LB', 'RB', 'LT', 'RT']
         active = [btn_names[i] for i in range(8) if btns.get(i, 0)]
-        self._display_status(move, yaw,
+        self._display_status(-move, yaw,   # v5.1: 取反使前进时条形向右填充
                              self.target_depth if self.depth_hold_on else 0.0,
                              active, is_dive_gear=is_dive_gear)
 
@@ -826,6 +901,7 @@ class JoyController(Node):
             'e_stopped': self.e_stopped,
             'depth_hold': self.depth_hold_on,
             'yaw_hold': self.yaw_hold_on,
+            'light': self.light_state,
             'target_depth': round(self.target_depth, 2),
             'ts': time.time()
         }, ensure_ascii=False)
