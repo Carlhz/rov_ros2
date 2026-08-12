@@ -30,7 +30,7 @@ export ROS_LOCALHOST_ONLY=0
 if [ "$CMD" = "stop" ]; then
     echo "=== 停止传感器驱动 (INS保持运行) ==="
     # 使用 pgrep 查找所有相关进程，兼容 busybox
-    for proc in ttyS5_modbus_hub altimeter_driver motor_controller dvl_driver; do
+    for proc in ttyS5_modbus_hub altimeter_driver motor_controller motor_ros_bridge dvl_driver; do
         PIDS=$(pgrep -f "$proc" 2>/dev/null)
         if [ -n "$PIDS" ]; then
             for pid in $PIDS; do
@@ -40,7 +40,7 @@ if [ "$CMD" = "stop" ]; then
     done
     sleep 1
     # 强制停止残留进程
-    for proc in ttyS5_modbus_hub altimeter_driver motor_controller dvl_driver; do
+    for proc in ttyS5_modbus_hub altimeter_driver motor_controller motor_ros_bridge dvl_driver; do
         PIDS=$(pgrep -f "$proc" 2>/dev/null)
         if [ -n "$PIDS" ]; then
             for pid in $PIDS; do
@@ -82,7 +82,7 @@ if [ "$CMD" = "status" ]; then
     "${SCRIPT_DIR}/setup_can.sh" status 2>/dev/null || ip link show can0 2>/dev/null | head -1
     echo ""
     echo "── 进程 ──"
-    ps aux 2>/dev/null | grep -E "ins_driver_auto|ttyS5_modbus_hub|altimeter_driver|motor_controller|dvl_driver" | grep -v grep | while read line; do
+    ps aux 2>/dev/null | grep -E "ins_driver_auto|ttyS5_modbus_hub|altimeter_driver|motor_controller|motor_ros_bridge|dvl_driver" | grep -v grep | while read line; do
         echo "  [RUN] $line"
     done || echo "  无运行中进程"
     echo ""
@@ -143,12 +143,23 @@ echo ""
 echo "启动驱动(ROS_DOMAIN_ID=${ROS_DOMAIN_ID})..."
 echo ""
 
-# ─── 启动电机控制器 ───────────────────────────
+# ─── 启动电机控制器 (C 核心 + ROS 桥, v9.0) ───────────
+# 架构: motor_controller (C 二进制, CAN+PID+推力分配) + motor_ros_bridge.py (ROS 桥)
+# 用 pgrep -f 匹配 (进程名 motor_controller 17字符超15会截断, -x 不可靠)
 if pgrep -f "motor_controller" > /dev/null 2>&1; then
-    echo "[--] 电机控制器已在运行，跳过"
+    echo "[--] C 电机控制器已在运行，跳过"
 else
-    echo "[>>] 启动 ROV 电机控制器 (订阅 /rov/cmd_vel)..."
-    nohup python3 -u "${SCRIPT_DIR}/motor_controller.py" >> /tmp/motor_controller.log 2>&1 &
+    echo "[>>] 启动 C 电机控制器 (motor_controller v9.0, CAN+B+伪逆+PID)..."
+    chmod +x "${SCRIPT_DIR}/motor_controller" 2>/dev/null
+    nohup "${SCRIPT_DIR}/motor_controller" >> /tmp/motor_controller.log 2>&1 &
+    echo "     PID=$!"
+    sleep 0.5  # 等 C 程序初始化共享内存
+fi
+if pgrep -f "motor_ros_bridge" > /dev/null 2>&1; then
+    echo "[--] 电机 ROS 桥已在运行，跳过"
+else
+    echo "[>>] 启动电机 ROS 桥 (motor_ros_bridge.py, mmap 通信)..."
+    nohup python3 -u "${SCRIPT_DIR}/motor_ros_bridge.py" >> /tmp/motor_ros_bridge.log 2>&1 &
     echo "     PID=$!"
 fi
 
@@ -207,7 +218,8 @@ echo "║  保持静止！预计 3-10 分钟完成对准          ║"
 echo "╚════════════════════════════════════════════╝"
 echo ""
 echo "日志文件:"
-echo "  电机:   /tmp/motor_controller.log"
+echo "  电机(C): /tmp/motor_controller.log"
+echo "  电机桥:  /tmp/motor_ros_bridge.log"
 echo "  INS:    /tmp/ins_driver.log"
 echo "  ttyS5:  /tmp/ttyS5_modbus_hub.log"
 echo "  高度计: /tmp/altimeter.log"
@@ -229,5 +241,5 @@ else
     echo "前台模式运行中 (Ctrl+C 退出)"
     echo "============================================"
     # 前台模式：实时显示各日志
-    tail -f /tmp/motor_controller.log /tmp/ins_driver.log /tmp/ttyS5_modbus_hub.log /tmp/altimeter.log 2>/dev/null
+    tail -f /tmp/motor_controller.log /tmp/motor_ros_bridge.log /tmp/ins_driver.log /tmp/ttyS5_modbus_hub.log /tmp/altimeter.log 2>/dev/null
 fi

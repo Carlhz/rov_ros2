@@ -19,7 +19,11 @@ RK_FILES = [
     ("rk3588/start_all.sh",              "/opt/ros/rov_ros2_ws/start_all.sh"),
     ("rk3588/setup_ip.sh",               "/opt/ros/rov_ros2_ws/setup_ip.sh"),
     ("rk3588/setup_can.sh",              "/opt/ros/rov_ros2_ws/setup_can.sh"),
-    ("rk3588/motor_controller.py",       "/opt/ros/rov_ros2_ws/motor_controller.py"),
+    # v9.0: C 重写 — C 核心 + ROS 桥 + aarch64 二进制 (原 .py 保留作回退)
+    ("rk3588/motor_controller",          "/opt/ros/rov_ros2_ws/motor_controller"),
+    ("rk3588/motor_controller.c",         "/opt/ros/rov_ros2_ws/motor_controller.c"),
+    ("rk3588/motor_ros_bridge.py",       "/opt/ros/rov_ros2_ws/motor_ros_bridge.py"),
+    ("rk3588/motor_controller.py",        "/opt/ros/rov_ros2_ws/motor_controller.py"),
     ("rk3588/thrust_allocator.py",        "/opt/ros/rov_ros2_ws/thrust_allocator.py"),
     ("rk3588/dvl_driver.py",             "/opt/ros/rov_ros2_ws/dvl_driver.py"),
     ("sensors/ttyS5_modbus_hub.py",      "/opt/ros/rov_ros2_ws/sensors/ttyS5_modbus_hub.py"),
@@ -64,9 +68,10 @@ def deploy(target, name, files):
                 else:
                     print(f"  跳过: {local_rel} (文件不存在)")
 
-        # chmod 可执行文件
+        # chmod 可执行文件 (.sh/.py + 无扩展名二进制如 motor_controller)
         for _, remote_abs in files:
-            if remote_abs.endswith('.sh') or remote_abs.endswith('.py'):
+            bn = os.path.basename(remote_abs)
+            if bn.endswith('.sh') or bn.endswith('.py') or '.' not in bn:
                 ssh.exec_command(f"chmod +x {remote_abs}")
 
         print(f"\n[OK] {name} 部署完成")

@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
-ROV 手柄控制器 v5.3.1 (VM 端) — 纯指令转发 + 档位推力配比生效
-深度PID + 姿态PID 已全部迁移至 motor_controller (RK3588 本地)
+ROV 手柄控制器 v5.4 (VM 端) — 纯指令转发 + 档位增益移至 C 程序
+深度PID + 姿态PID 已全部迁移至 motor_controller (RK3588 C 程序 v9.0)
+
+v5.4 改进 (配合 motor_controller.c v9.0 C 重写):
+  - 档位缩放从手柄移除: GEAR_PROFILES 全 1.0, 摇杆原值直接转发
+  - 档位递增增益移至 C 程序 (GEAR_FX/DIVE/SURF/YAW_GAIN 数组)
+  - 新1档=原3档全速, 2档增强, 3档=硬件上限 (避免双重缩放)
+  - 显示改为档位满杆 RPM (尾推/垂推/ID7)
+  - 配合 motor_controller.c (C核心) + motor_ros_bridge.py (ROS桥)
 
 v5.3.1 修复 (升档崩溃):
   - 修复: 3档→4档(定深)升档瞬间 GEAR_PROFILES[self.gear] 索引越界(IndexError)
@@ -82,17 +89,25 @@ AXIS_MAX     = 32767.0
 MAX_RPM      = 1800
 MIN_RPM      = 1100
 
-# ── 手动档位推力配比 (v5.3: 档位真正生效) ────────────────────
-# 三元组 (尾推move, 升降up, 侧推yaw) 的满量程缩放系数:
-#   1档: 精细操控  尾45%  升55%  侧50%
-#   2档: 巡航      尾70%  升78%  侧75%
-#   3档: 全速      100%   100%   100%
-# 档位间线性递进: move 0.45→0.70→1.00, up 0.55→0.78→1.00, yaw 0.50→0.75→1.00
-# 定深模式(4档+悬停开启)不缩放, 维持原样转发
+# ── 手动档位推力配比 (v5.4: 档位增益移至 C 程序 motor_controller.c) ──
+# v9.0 架构变更: 档位递增不再由手柄缩放, 而由 C 程序按 gear 应用增益数组
+# 这里 GEAR_PROFILES 全 1.0 = 摇杆原值直接转发, 不做缩放 (避免双重缩放)
+# C 程序手动模式满杆 RPM 目标:
+#   1档(=原3档全速): 尾推1235 垂推下潜1480/上浮1400 ID7 1280
+#   2档(增强):        尾推1400 垂推下潜1520/上浮1470 ID7 1340
+#   3档(硬件上限):    尾推1550 垂推1550         ID7 1400
+# 定深模式(4档+悬停开启)不受档位增益影响, C 程序定深分支不应用 GEAR 增益
 GEAR_PROFILES = [
-    (0.45, 0.55, 0.50),
-    (0.70, 0.78, 0.75),
     (1.00, 1.00, 1.00),
+    (1.00, 1.00, 1.00),
+    (1.00, 1.00, 1.00),
+]
+
+# 档位满杆 RPM 显示表 (与 C 程序 GEAR_*_GAIN 对应, 仅显示用)
+GEAR_RPM_DISPLAY = [
+    (1235, 1480, 1280),  # 1档: 尾推/垂推下潜/ID7
+    (1400, 1520, 1340),  # 2档
+    (1550, 1550, 1400),  # 3档
 ]
 
 # ── 深度悬停参数 ───────────────────────────────────────────
@@ -575,11 +590,13 @@ class JoyController(Node):
         # 标题行
         estop_mark = ' !!急停!!' if self.e_stopped else ''
         if is_dive_gear:
-            gear_txt = 'ROV-JOY v5.3.1 [4档/定深] PID@RK3588  {}'.format(estop_mark)
+            gear_txt = 'ROV-JOY v5.4 [4档/定深] PID@RK3588  {}'.format(estop_mark)
         else:
-            m_s, u_s, y_s = GEAR_PROFILES[min(self.gear, len(GEAR_PROFILES) - 1)]
-            gear_txt = 'ROV-JOY v5.3.1 档位{}/3  尾{:3.0f}% 升{:3.0f}% 侧{:3.0f}%  {}'.format(
-                self.gear + 1, m_s * 100, u_s * 100, y_s * 100, estop_mark)
+            # v5.4: 显示档位满杆 RPM (档位增益在 C 程序, 此处仅显示)
+            idx = min(self.gear, len(GEAR_RPM_DISPLAY) - 1)
+            t_rpm, v_rpm, y_rpm = GEAR_RPM_DISPLAY[idx]
+            gear_txt = 'ROV-JOY v5.4 档位{}/3  尾{} 垂{} ID7{}  {}'.format(
+                self.gear + 1, t_rpm, v_rpm, y_rpm, estop_mark)
 
         # 深度行
         d_cur = '{:5.2f}'.format(self.current_depth) if self.depth_valid else '--.--'
